@@ -53,7 +53,20 @@ void VariableWriteHandle::Close() {
 // =============================================================================
 
 bool VariableFileSystem::CanHandleFile(const string &fpath) {
-	return StringUtil::StartsWith(fpath, "variable:");
+	// Handle both variable: and tmp_variable: prefixes
+	//
+	// Why tmp_variable:?
+	// DuckDB's COPY command uses temp files by default. For a path like "variable:foo",
+	// DuckDB creates temp path by splitting into directory + filename, then prepending "tmp_":
+	//   - path = "" (empty, no directory component)
+	//   - filename = "variable:foo" (entire path is the "filename")
+	//   - temp_path = JoinPath("", "tmp_" + "variable:foo") = "tmp_variable:foo"
+	//
+	// Without handling tmp_variable:, the temp file would go to the local filesystem,
+	// then the move operation would fail (cross-filesystem move from local to our virtual FS).
+	// By handling tmp_variable: here, the entire temp file flow stays within our filesystem.
+	return StringUtil::StartsWith(fpath, "variable:") ||
+	       StringUtil::StartsWith(fpath, "tmp_variable:");
 }
 
 string VariableFileSystem::GetName() const {
@@ -61,6 +74,19 @@ string VariableFileSystem::GetName() const {
 }
 
 string VariableFileSystem::ExtractVariableName(const string &path) {
+	// Extract the DuckDB variable name from a path
+	//
+	// Path mapping:
+	//   "variable:foo"     -> variable name "foo"
+	//   "tmp_variable:foo" -> variable name "tmp_foo"
+	//
+	// The tmp_ prefix is preserved in the variable name so that:
+	//   1. Temp variables don't collide with user variables
+	//   2. MoveFile(tmp_variable:foo, variable:foo) correctly moves tmp_foo -> foo
+	//   3. After the move, tmp_foo is deleted and foo contains the data
+	if (StringUtil::StartsWith(path, "tmp_variable:")) {
+		return "tmp_" + path.substr(13); // len("tmp_variable:")
+	}
 	return path.substr(9); // len("variable:")
 }
 
@@ -232,6 +258,15 @@ bool VariableFileSystem::TryRemoveFile(const string &filename, optional_ptr<File
 }
 
 void VariableFileSystem::MoveFile(const string &source, const string &target, optional_ptr<FileOpener> opener) {
+	// Move a variable from source path to target path
+	//
+	// This is called by DuckDB's COPY command after writing to a temp file:
+	//   MoveFile("tmp_variable:foo", "variable:foo")
+	//
+	// The flow:
+	//   1. Read source variable (tmp_foo)
+	//   2. Write to target variable (foo)
+	//   3. Delete source variable (tmp_foo)
 	if (!CanHandleFile(source) || !CanHandleFile(target)) {
 		throw IOException("MoveFile: both source and target must be variable: paths");
 	}

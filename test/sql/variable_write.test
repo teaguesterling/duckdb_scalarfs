@@ -10,7 +10,7 @@ require scalarfs
 # Basic COPY TO variable
 # =============================================================================
 
-# Write CSV to variable (USE_TMP_FILE false required for variable: protocol)
+# Write CSV to variable (USE_TMP_FILE false used here; default also works)
 statement ok
 CREATE TABLE t1 AS SELECT 1 as a, 2 as b UNION ALL SELECT 3, 4;
 
@@ -123,27 +123,14 @@ statement ok
 DROP TABLE special;
 
 # =============================================================================
-# Known limitation: USE_TMP_FILE (default behavior) not yet working
+# Note: USE_TMP_FILE (default behavior) is fully supported
 # =============================================================================
 # DuckDB's default COPY behavior writes to a temp file first, then moves it.
-# The move operation (variable:tmp_X -> variable:X) requires cross-filesystem
-# coordination that isn't fully implemented yet.
+# For "variable:foo", DuckDB creates temp path "tmp_variable:foo".
 #
-# For now, USE_TMP_FILE false is required for variable: writes.
-# TODO: Investigate proper temp file handling for virtual filesystems.
-
-# This test documents the current broken behavior - it should fail
-# Uncomment when fixed:
-# statement ok
-# CREATE TABLE tmp_test AS SELECT 1 as val;
+# Our filesystem handles this by:
+#   1. Recognizing both "variable:" and "tmp_variable:" prefixes
+#   2. Mapping "tmp_variable:foo" to variable name "tmp_foo"
+#   3. MoveFile transfers data from tmp_foo to foo
 #
-# statement ok
-# COPY tmp_test TO 'variable:tmp_file_test' (FORMAT csv, HEADER false);
-#
-# query I
-# SELECT getvariable('tmp_file_test') LIKE '1%';
-# ----
-# true
-#
-# statement ok
-# DROP TABLE tmp_test;
+# See variable_tmpfile.test for explicit tests of this behavior.

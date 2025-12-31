@@ -1,0 +1,66 @@
+# name: test/sql/variable_tmpfile.test
+# description: Test variable: protocol with USE_TMP_FILE true (default behavior)
+# group: [scalarfs]
+
+require scalarfs
+
+# =============================================================================
+# Test: Basic write with temp file (default behavior)
+# =============================================================================
+
+# First verify our filesystem works at all
+statement ok
+SET VARIABLE basic_test = 'initial';
+
+query I
+SELECT content FROM read_text('variable:basic_test');
+----
+initial
+
+# Now test COPY with default USE_TMP_FILE (should be true)
+statement ok
+CREATE TABLE t1 AS SELECT 'hello' as msg;
+
+# This is the problematic case - uses temp file by default
+statement ok
+COPY t1 TO 'variable:tmpfile_test' (FORMAT csv, HEADER false);
+
+# Check if the variable was set
+query I
+SELECT getvariable('tmpfile_test') IS NOT NULL;
+----
+true
+
+query I
+SELECT getvariable('tmpfile_test') LIKE 'hello%';
+----
+true
+
+statement ok
+DROP TABLE t1;
+
+# =============================================================================
+# Test: Overwrite existing variable with temp file
+# =============================================================================
+
+statement ok
+SET VARIABLE overwrite_tmp = 'old value';
+
+query I
+SELECT getvariable('overwrite_tmp');
+----
+old value
+
+statement ok
+CREATE TABLE t2 AS SELECT 'new value' as v;
+
+statement ok
+COPY t2 TO 'variable:overwrite_tmp' (FORMAT csv, HEADER false);
+
+query I
+SELECT getvariable('overwrite_tmp') LIKE 'new value%';
+----
+true
+
+statement ok
+DROP TABLE t2;
