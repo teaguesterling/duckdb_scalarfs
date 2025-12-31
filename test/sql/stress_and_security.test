@@ -1,0 +1,484 @@
+# name: test/sql/stress_and_security.test
+# description: Stress tests, boundary conditions, and security tests
+# group: [scalarfs]
+
+require scalarfs
+
+# =============================================================================
+# Variable Type Handling
+# =============================================================================
+
+# INTEGER variable - should be converted to string
+statement ok
+SET VARIABLE int_var = 42;
+
+query I
+SELECT content FROM read_text('variable:int_var');
+----
+42
+
+# FLOAT variable
+statement ok
+SET VARIABLE float_var = 3.14159;
+
+query I
+SELECT content FROM read_text('variable:float_var');
+----
+3.14159
+
+# BOOLEAN variable
+statement ok
+SET VARIABLE bool_var = true;
+
+query I
+SELECT content FROM read_text('variable:bool_var');
+----
+true
+
+# NULL variable - should error
+statement ok
+SET VARIABLE null_var = NULL;
+
+statement error
+SELECT content FROM read_text('variable:null_var');
+----
+Variable 'null_var' is NULL
+
+# BLOB variable - note: ToString() gives escaped representation
+# The BLOB '\x00\x01\x02\xFF' becomes the string "\x00\x01\x02\xFF" (16 chars)
+statement ok
+SET VARIABLE blob_var = '\x00\x01\x02\xFF'::BLOB;
+
+query I
+SELECT octet_length(content) FROM read_blob('variable:blob_var');
+----
+16
+
+# To store actual binary, use base64 encoding or write via COPY
+statement ok
+SET VARIABLE binary_var = to_data_uri(chr(0) || chr(1) || chr(2) || chr(255));
+
+query I
+SELECT length(from_data_uri(content)) FROM read_text('variable:binary_var');
+----
+4
+
+# =============================================================================
+# Empty and Minimal Content
+# =============================================================================
+
+# Empty string variable
+statement ok
+SET VARIABLE empty_var = '';
+
+query I
+SELECT length(content) FROM read_text('variable:empty_var');
+----
+0
+
+# Empty data+varchar
+query I
+SELECT length(content) FROM read_text('data+varchar:');
+----
+0
+
+# Empty data+blob
+query I
+SELECT length(content) FROM read_text('data+blob:');
+----
+0
+
+# Empty base64
+query I
+SELECT length(content) FROM read_text('data:;base64,');
+----
+0
+
+# Single character
+query I
+SELECT content FROM read_text('data+varchar:x');
+----
+x
+
+# Single null byte
+query I
+SELECT octet_length(content) FROM read_blob('data+blob:\0');
+----
+1
+
+# =============================================================================
+# Large Content Stress Tests
+# =============================================================================
+
+# 10KB string
+statement ok
+SET VARIABLE large_10k = repeat('x', 10000);
+
+query I
+SELECT length(content) FROM read_text('variable:large_10k');
+----
+10000
+
+# 100KB string
+statement ok
+SET VARIABLE large_100k = repeat('abcdefghij', 10000);
+
+query I
+SELECT length(content) FROM read_text('variable:large_100k');
+----
+100000
+
+# 1MB string
+statement ok
+SET VARIABLE large_1m = repeat('0123456789', 100000);
+
+query I
+SELECT length(content) FROM read_text('variable:large_1m');
+----
+1000000
+
+# Large CSV parsing
+statement ok
+SET VARIABLE large_csv = 'id,value' || chr(10) || (SELECT string_agg(i::VARCHAR || ',' || (i*2)::VARCHAR, chr(10)) FROM range(1000) t(i));
+
+query I
+SELECT count(*) FROM read_csv('variable:large_csv');
+----
+1000
+
+# =============================================================================
+# Special Characters and Unicode
+# =============================================================================
+
+# Unicode content
+statement ok
+SET VARIABLE unicode_var = '你好世界 🎉 émojis ñ';
+
+query I
+SELECT content FROM read_text('variable:unicode_var');
+----
+你好世界 🎉 émojis ñ
+
+# All printable ASCII
+statement ok
+SET VARIABLE ascii_printable = ' !"#$%&''()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
+
+query I
+SELECT length(content) FROM read_text('variable:ascii_printable');
+----
+95
+
+# Control characters in data+blob
+query I
+SELECT octet_length(content) FROM read_blob('data+blob:\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F');
+----
+16
+
+# All escape sequences (backslash, newline, CR, tab, null, backslash)
+# Note: In sqllogic test files, \\\\ becomes \\ in SQL, which blob decodes as one \
+query I
+SELECT octet_length(content) FROM read_blob('data+blob:\\\n\r\t\0');
+----
+5
+
+# =============================================================================
+# Malformed URI Handling
+# =============================================================================
+
+# Missing protocol - falls through to local filesystem, returns empty if not found
+query I
+SELECT count(*) FROM read_text('no_protocol_here');
+----
+0
+
+# Invalid data: URI (missing comma)
+statement error
+SELECT from_data_uri('data:no-comma');
+----
+Invalid data: URI
+
+# Invalid base64
+statement error
+SELECT from_data_uri('data:;base64,!!!invalid!!!');
+----
+Could not decode string
+
+# Invalid hex escape in blob
+statement error
+SELECT from_blob_uri('data+blob:\xGG');
+----
+Invalid escape sequence
+
+# Incomplete hex escape
+statement error
+SELECT from_blob_uri('data+blob:\x');
+----
+Invalid escape sequence
+
+statement error
+SELECT from_blob_uri('data+blob:\x1');
+----
+Invalid escape sequence
+
+# Unknown escape sequence
+statement error
+SELECT from_blob_uri('data+blob:\q');
+----
+Invalid escape sequence
+
+# =============================================================================
+# Boundary Conditions
+# =============================================================================
+
+# Variable name with special characters (should work - DuckDB allows these)
+statement ok
+SET VARIABLE "var_with_underscore" = 'test1';
+
+query I
+SELECT content FROM read_text('variable:var_with_underscore');
+----
+test1
+
+# Very long variable name
+statement ok
+SET VARIABLE very_long_variable_name_that_goes_on_and_on_and_on_for_a_while = 'long_name';
+
+query I
+SELECT content FROM read_text('variable:very_long_variable_name_that_goes_on_and_on_and_on_for_a_while');
+----
+long_name
+
+# Variable with numbers
+statement ok
+SET VARIABLE var123 = 'numeric_suffix';
+
+query I
+SELECT content FROM read_text('variable:var123');
+----
+numeric_suffix
+
+# =============================================================================
+# Buffer Overflow Attempts
+# =============================================================================
+
+# Long repeated pattern
+statement ok
+SET VARIABLE overflow_test1 = repeat('A', 65536);
+
+query I
+SELECT length(content) FROM read_text('variable:overflow_test1');
+----
+65536
+
+# Pattern designed to trigger off-by-one errors
+statement ok
+SET VARIABLE overflow_test2 = repeat('B', 4095) || 'X' || repeat('B', 4096);
+
+query I
+SELECT length(content) FROM read_text('variable:overflow_test2');
+----
+8192
+
+# String with many escape sequences
+query I
+SELECT octet_length(content) FROM read_blob('data+blob:' || repeat('\n', 1000));
+----
+1000
+
+# Nested-looking patterns (shouldn't cause issues)
+statement ok
+SET VARIABLE nested_pattern = repeat('data+varchar:', 100);
+
+query I
+SELECT length(content) FROM read_text('variable:nested_pattern');
+----
+1300
+
+# =============================================================================
+# Injection Attempts
+# =============================================================================
+
+# SQL-like injection in content (should be treated as data, not executed)
+statement ok
+SET VARIABLE sql_injection = 'Robert''); DROP TABLE students;--';
+
+query I
+SELECT content FROM read_text('variable:sql_injection');
+----
+Robert'); DROP TABLE students;--
+
+# Path traversal attempt (should be literal, not traversed)
+statement ok
+SET VARIABLE path_traversal = '../../../etc/passwd';
+
+query I
+SELECT content FROM read_text('variable:path_traversal');
+----
+../../../etc/passwd
+
+# Null byte injection
+statement ok
+SET VARIABLE null_inject = 'before' || chr(0) || 'after';
+
+query I
+SELECT octet_length(content) FROM read_blob('variable:null_inject');
+----
+12
+
+# Format string patterns
+statement ok
+SET VARIABLE format_string = '%s%s%s%s%s%n%n%n%n%n';
+
+query I
+SELECT content FROM read_text('variable:format_string');
+----
+%s%s%s%s%s%n%n%n%n%n
+
+# =============================================================================
+# Concurrent-like Access Patterns
+# =============================================================================
+
+# Multiple variables set and read
+statement ok
+SET VARIABLE multi_1 = 'value1';
+
+statement ok
+SET VARIABLE multi_2 = 'value2';
+
+statement ok
+SET VARIABLE multi_3 = 'value3';
+
+query I
+SELECT count(*) FROM read_text('variable:multi_*');
+----
+3
+
+# Overwrite variable and re-read
+statement ok
+SET VARIABLE overwrite_test = 'original';
+
+query I
+SELECT content FROM read_text('variable:overwrite_test');
+----
+original
+
+statement ok
+SET VARIABLE overwrite_test = 'modified';
+
+query I
+SELECT content FROM read_text('variable:overwrite_test');
+----
+modified
+
+# =============================================================================
+# Write and Read-back Tests
+# =============================================================================
+
+require json
+
+# Write JSON and read back
+statement ok
+CREATE TABLE write_test(id INT, name VARCHAR);
+
+statement ok
+INSERT INTO write_test VALUES (1, 'Alice'), (2, 'Bob');
+
+statement ok
+COPY write_test TO 'variable:write_json' (FORMAT json);
+
+query II
+SELECT id, name FROM read_json('variable:write_json') ORDER BY id;
+----
+1	Alice
+2	Bob
+
+# Write CSV and read back
+statement ok
+COPY write_test TO 'variable:write_csv' (FORMAT csv, HEADER true);
+
+query II
+SELECT id, name FROM read_csv('variable:write_csv') ORDER BY id;
+----
+1	Alice
+2	Bob
+
+statement ok
+DROP TABLE write_test;
+
+# =============================================================================
+# Helper Function Edge Cases
+# =============================================================================
+
+# to_scalarfs_uri with various content types
+query I
+SELECT to_scalarfs_uri('') = 'data+varchar:';
+----
+true
+
+query I
+SELECT length(to_scalarfs_uri(repeat('x', 10000))) > 10000;
+----
+true
+
+# Round-trip all encodings
+query I
+SELECT from_data_uri(to_data_uri('test')) = 'test';
+----
+true
+
+query I
+SELECT from_varchar_uri(to_varchar_uri('test')) = 'test';
+----
+true
+
+query I
+SELECT from_blob_uri(to_blob_uri('test')) = 'test';
+----
+true
+
+query I
+SELECT from_scalarfs_uri(to_scalarfs_uri('test')) = 'test';
+----
+true
+
+# Round-trip with special content
+query I
+SELECT from_scalarfs_uri(to_scalarfs_uri('line1' || chr(10) || 'line2')) = 'line1' || chr(10) || 'line2';
+----
+true
+
+# =============================================================================
+# Resource Cleanup
+# =============================================================================
+
+# Reset test variables to clean up
+statement ok
+RESET VARIABLE int_var;
+
+statement ok
+RESET VARIABLE float_var;
+
+statement ok
+RESET VARIABLE bool_var;
+
+statement ok
+RESET VARIABLE null_var;
+
+statement ok
+RESET VARIABLE blob_var;
+
+statement ok
+RESET VARIABLE empty_var;
+
+statement ok
+RESET VARIABLE large_10k;
+
+statement ok
+RESET VARIABLE large_100k;
+
+statement ok
+RESET VARIABLE large_1m;
+
+statement ok
+RESET VARIABLE large_csv;
+
