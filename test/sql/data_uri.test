@@ -1,0 +1,157 @@
+# name: test/sql/data_uri.test
+# description: Test data: URI protocol (RFC 2397)
+# group: [scalarfs]
+
+require json
+
+require scalarfs
+
+# =============================================================================
+# Basic URL-encoded content
+# =============================================================================
+
+# Simple CSV with URL-encoded newlines
+query II
+SELECT * FROM read_csv('data:,a,b%0A1,2%0A3,4');
+----
+1	2
+3	4
+
+# URL-encoded spaces
+query I
+SELECT content FROM read_text('data:,hello%20world');
+----
+hello world
+
+# URL-encoded special characters
+query I
+SELECT content FROM read_text('data:,%25%20%2C');
+----
+% ,
+
+# Plus sign should remain as plus (not space, unlike query strings)
+query I
+SELECT content FROM read_text('data:,a+b');
+----
+a+b
+
+# =============================================================================
+# Base64-encoded content
+# =============================================================================
+
+# Simple base64 CSV (a,b\n1,2\n)
+query II
+SELECT * FROM read_csv('data:;base64,YSxiCjEsMgo=');
+----
+1	2
+
+# Base64 with padding
+query I
+SELECT content FROM read_text('data:;base64,aGVsbG8=');
+----
+hello
+
+# Base64 without padding (single char result)
+query I
+SELECT content FROM read_text('data:;base64,YQ==');
+----
+a
+
+# Base64 JSON
+query I
+SELECT a FROM read_json('data:;base64,eyJhIjo0Mn0=');
+----
+42
+
+# =============================================================================
+# Mediatype handling (should be ignored by readers)
+# =============================================================================
+
+# JSON with explicit mediatype
+query I
+SELECT a FROM read_json('data:application/json,{"a":42}');
+----
+42
+
+# CSV with explicit mediatype
+query II
+SELECT * FROM read_csv('data:text/csv,a,b%0A1,2');
+----
+1	2
+
+# Base64 with mediatype
+query I
+SELECT content FROM read_text('data:text/plain;base64,aGVsbG8=');
+----
+hello
+
+# Mediatype with charset (ignored)
+query I
+SELECT content FROM read_text('data:text/plain;charset=utf-8,hello');
+----
+hello
+
+# =============================================================================
+# Empty content
+# =============================================================================
+
+query I
+SELECT length(content) FROM read_text('data:,');
+----
+0
+
+query I
+SELECT length(content) FROM read_text('data:;base64,');
+----
+0
+
+# =============================================================================
+# Edge cases
+# =============================================================================
+
+# Content that looks like base64 but isn't (no ;base64 marker)
+query I
+SELECT content FROM read_text('data:,YWJj');
+----
+YWJj
+
+# Multiple semicolons in metadata
+query I
+SELECT content FROM read_text('data:text/plain;charset=utf-8;base64,aGVsbG8=');
+----
+hello
+
+# Comma in content (after first comma which is delimiter)
+query I
+SELECT content FROM read_text('data:,a,b,c');
+----
+a,b,c
+
+# =============================================================================
+# Error cases
+# =============================================================================
+
+# Missing comma separator
+statement error
+SELECT * FROM read_csv('data:invalid');
+----
+Invalid data: URI
+
+# Just "data:" with nothing else
+statement error
+SELECT * FROM read_text('data:');
+----
+Invalid data: URI
+
+# Invalid base64 (odd length, bad padding)
+statement error
+SELECT * FROM read_text('data:;base64,abc');
+----
+base64
+
+# =============================================================================
+# Read-only verification
+# =============================================================================
+
+# Note: COPY TO path goes through a different mechanism that may bypass OpenFile
+# Skipping write tests for now - core read functionality is the priority

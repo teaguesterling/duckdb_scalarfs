@@ -1,0 +1,144 @@
+# name: test/sql/data_varchar.test
+# description: Test data+varchar: URI protocol (raw VARCHAR content)
+# group: [scalarfs]
+
+require json
+
+require scalarfs
+
+# =============================================================================
+# Basic content
+# =============================================================================
+
+# Simple JSON
+query I
+SELECT debug FROM read_json('data+varchar:{"debug":true}');
+----
+true
+
+# Simple text
+query I
+SELECT content FROM read_text('data+varchar:hello world');
+----
+hello world
+
+# =============================================================================
+# CSV with embedded newlines
+# =============================================================================
+
+query II
+SELECT * FROM read_csv('data+varchar:a,b
+1,2
+3,4');
+----
+1	2
+3	4
+
+# Single row CSV
+query II
+SELECT * FROM read_csv('data+varchar:x,y
+10,20');
+----
+10	20
+
+# =============================================================================
+# Empty content
+# =============================================================================
+
+query I
+SELECT length(content) FROM read_text('data+varchar:');
+----
+0
+
+# =============================================================================
+# Special characters (no escaping needed - raw passthrough)
+# =============================================================================
+
+# Quotes and ampersands
+query I
+SELECT content FROM read_text('data+varchar:hello "world" & <stuff>');
+----
+hello "world" & <stuff>
+
+# Backslashes (literal, not escape sequences)
+query I
+SELECT content FROM read_text('data+varchar:path\to\file');
+----
+path\to\file
+
+# Percent signs (not URL-decoded)
+query I
+SELECT content FROM read_text('data+varchar:%20%0A');
+----
+%20%0A
+
+# Unicode
+query I
+SELECT content FROM read_text('data+varchar:Hello, World!');
+----
+Hello, World!
+
+# =============================================================================
+# Colon handling
+# =============================================================================
+
+# Colon in content (first colon after prefix is not special)
+query I
+SELECT content FROM read_text('data+varchar:key:value');
+----
+key:value
+
+# Multiple colons
+query I
+SELECT content FROM read_text('data+varchar:a:b:c:d');
+----
+a:b:c:d
+
+# URL-like content
+query I
+SELECT content FROM read_text('data+varchar:https://example.com');
+----
+https://example.com
+
+# =============================================================================
+# JSON variations
+# =============================================================================
+
+# Array
+query I
+SELECT json_array_length(content::JSON) FROM read_text('data+varchar:[1,2,3]');
+----
+3
+
+# Nested object
+query I
+SELECT a.b FROM read_json('data+varchar:{"a":{"b":42}}');
+----
+42
+
+# =============================================================================
+# Integration with table storage
+# =============================================================================
+
+# Note: read_json does not support lateral join with column parameters
+# This tests that URIs can be stored and retrieved for later use
+statement ok
+CREATE TABLE paths(id INT, uri VARCHAR);
+
+statement ok
+INSERT INTO paths VALUES (1, 'data+varchar:{"x":1}'), (2, 'data+varchar:{"x":2}');
+
+query I
+SELECT uri FROM paths WHERE id = 1;
+----
+data+varchar:{"x":1}
+
+statement ok
+DROP TABLE paths;
+
+# =============================================================================
+# Read-only verification
+# =============================================================================
+
+# Note: COPY TO path goes through a different mechanism that may bypass OpenFile
+# Skipping write tests for now - core read functionality is the priority

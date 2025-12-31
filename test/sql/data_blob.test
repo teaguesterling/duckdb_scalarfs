@@ -1,0 +1,214 @@
+# name: test/sql/data_blob.test
+# description: Test data+blob: URI protocol (escaped content)
+# group: [scalarfs]
+
+require json
+
+require scalarfs
+
+# =============================================================================
+# Letter escape sequences
+# =============================================================================
+
+# Newline escape - verify content has newline by checking length and parts
+query I
+SELECT length(content) FROM read_text('data+blob:line1\nline2');
+----
+11
+
+query I
+SELECT split_part(content, chr(10), 1) FROM read_text('data+blob:line1\nline2');
+----
+line1
+
+query I
+SELECT split_part(content, chr(10), 2) FROM read_text('data+blob:line1\nline2');
+----
+line2
+
+# Tab escape - verify content has tab by checking parts
+query I
+SELECT length(content) FROM read_text('data+blob:col1\tcol2');
+----
+9
+
+query I
+SELECT split_part(content, chr(9), 1) FROM read_text('data+blob:col1\tcol2');
+----
+col1
+
+query I
+SELECT split_part(content, chr(9), 2) FROM read_text('data+blob:col1\tcol2');
+----
+col2
+
+# Carriage return + newline (Windows line ending)
+query I
+SELECT length(content) FROM read_text('data+blob:a\r\nb');
+----
+4
+
+# Null byte escape
+query I
+SELECT octet_length(content) FROM read_blob('data+blob:a\0b');
+----
+3
+
+# =============================================================================
+# Backslash escape
+# =============================================================================
+
+# Double backslash -> single backslash
+query I
+SELECT content FROM read_text('data+blob:path\\to\\file');
+----
+path\to\file
+
+# Multiple consecutive backslashes
+query I
+SELECT content FROM read_text('data+blob:\\\\\\\\');
+----
+\\\\
+
+# =============================================================================
+# Hex escape sequences
+# =============================================================================
+
+# Basic hex escape - bell char (ASCII 7) is invisible but present
+query I
+SELECT length(content) FROM read_text('data+blob:bell\x07here');
+----
+9
+
+query I
+SELECT ascii(substr(content, 5, 1)) FROM read_text('data+blob:bell\x07here');
+----
+7
+
+# Uppercase hex
+query I
+SELECT content FROM read_text('data+blob:\x41\x42\x43');
+----
+ABC
+
+# Lowercase hex
+query I
+SELECT content FROM read_text('data+blob:\x61\x62\x63');
+----
+abc
+
+# Null via hex
+query I
+SELECT octet_length(content) FROM read_blob('data+blob:a\x00b');
+----
+3
+
+# All control characters via hex
+query I
+SELECT octet_length(content) FROM read_blob('data+blob:\x00\x01\x02\x03');
+----
+4
+
+# =============================================================================
+# Mixed escapes
+# =============================================================================
+
+# Verify length of mixed content: "start"(5) + tab(1) + "tab"(3) + newline(1) + "newline"(7) + backslash(1) + "slash"(5) = 23
+query I
+SELECT length(content) FROM read_text('data+blob:start\ttab\nnewline\\slash');
+----
+23
+
+# Complex mix
+query I
+SELECT length(content) FROM read_text('data+blob:a\nb\tc\\d\x00e');
+----
+9
+
+# =============================================================================
+# Empty content
+# =============================================================================
+
+query I
+SELECT length(content) FROM read_text('data+blob:');
+----
+0
+
+# =============================================================================
+# No escapes needed (passthrough)
+# =============================================================================
+
+query I
+SELECT content FROM read_text('data+blob:plain text 123');
+----
+plain text 123
+
+# Only letters and numbers
+query I
+SELECT content FROM read_text('data+blob:ABCabc123');
+----
+ABCabc123
+
+# =============================================================================
+# Error cases: Invalid escape sequences
+# =============================================================================
+
+# Unknown escape letter
+statement error
+SELECT * FROM read_text('data+blob:test\qinvalid');
+----
+Invalid escape sequence
+
+# Another unknown escape
+statement error
+SELECT * FROM read_text('data+blob:\z');
+----
+Invalid escape sequence
+
+# Incomplete hex escape (only 1 digit)
+statement error
+SELECT * FROM read_text('data+blob:test\x4');
+----
+Invalid
+
+# Incomplete hex escape (no digits)
+statement error
+SELECT * FROM read_text('data+blob:test\x');
+----
+Invalid
+
+# Trailing backslash
+statement error
+SELECT * FROM read_text('data+blob:test\');
+----
+Invalid escape sequence
+
+# Invalid hex characters
+statement error
+SELECT * FROM read_text('data+blob:\xGG');
+----
+Invalid
+
+# =============================================================================
+# CSV/JSON with escaped content
+# =============================================================================
+
+# CSV with escaped newlines
+query II
+SELECT * FROM read_csv('data+blob:a,b\n1,2\n3,4');
+----
+1	2
+3	4
+
+# JSON with escaped content - \\n becomes \n in JSON which is an actual newline
+query I
+SELECT length(msg) FROM read_json('data+blob:{"msg":"hello\\nworld"}');
+----
+11
+
+# =============================================================================
+# Read-only verification
+# =============================================================================
+
+# Note: COPY TO path goes through a different mechanism that may bypass OpenFile
+# Skipping write tests for now - core read functionality is the priority
