@@ -1,0 +1,291 @@
+# name: test/sql/scalarfs_functions.test
+# description: Test scalarfs encoding/decoding helper functions
+# group: [scalarfs]
+
+require scalarfs
+
+# =============================================================================
+# to_data_uri - Base64 encoding
+# =============================================================================
+
+query I
+SELECT to_data_uri('hello');
+----
+data:;base64,aGVsbG8=
+
+query I
+SELECT length(to_data_uri('a,b
+1,2'));
+----
+25
+
+# Empty string
+query I
+SELECT to_data_uri('');
+----
+data:;base64,
+
+# Binary content (using chr for null bytes)
+query I
+SELECT to_data_uri(chr(0) || chr(1) || chr(2));
+----
+data:;base64,AAEC
+
+# =============================================================================
+# to_varchar_uri - Raw VARCHAR (zero overhead)
+# =============================================================================
+
+query I
+SELECT to_varchar_uri('hello');
+----
+data+varchar:hello
+
+query I
+SELECT to_varchar_uri('{"debug":true}');
+----
+data+varchar:{"debug":true}
+
+# With newlines - check length instead (13 char prefix + 7 char content)
+query I
+SELECT length(to_varchar_uri('a,b
+1,2'));
+----
+20
+
+# Empty string
+query I
+SELECT to_varchar_uri('');
+----
+data+varchar:
+
+# =============================================================================
+# to_blob_uri - Escaped content
+# =============================================================================
+
+query I
+SELECT to_blob_uri('hello');
+----
+data+blob:hello
+
+# With backslash
+query I
+SELECT to_blob_uri('path\to\file');
+----
+data+blob:path\\to\\file
+
+# With newline - escapes to \n
+query I
+SELECT to_blob_uri('line1
+line2');
+----
+data+blob:line1\nline2
+
+# With tab
+query I
+SELECT to_blob_uri('col1	col2');
+----
+data+blob:col1\tcol2
+
+# With null byte (use chr(0))
+query I
+SELECT to_blob_uri(chr(0));
+----
+data+blob:\0
+
+# With carriage return (using chr)
+query I
+SELECT to_blob_uri('line1' || chr(13) || chr(10) || 'line2');
+----
+data+blob:line1\r\nline2
+
+# =============================================================================
+# to_scalarfs_uri - Auto-select optimal encoding
+# =============================================================================
+
+# Simple text -> data+varchar:
+query I
+SELECT to_scalarfs_uri('hello world');
+----
+data+varchar:hello world
+
+# Text with newlines -> data+varchar: (newlines are safe) - check prefix
+query I
+SELECT starts_with(to_scalarfs_uri('line1
+line2'), 'data+varchar:');
+----
+true
+
+# Text with control chars (>10% escape ratio) -> data:;base64
+query I
+SELECT to_scalarfs_uri('bell:' || chr(7));
+----
+data:;base64,YmVsbDoH
+
+# Text with few control chars (<10% escape ratio) -> data+blob:
+query I
+SELECT to_scalarfs_uri('this is a longer string with one' || chr(7) || ' control char');
+----
+data+blob:this is a longer string with one\x07 control char
+
+# Binary heavy -> data:;base64,
+query I
+SELECT to_scalarfs_uri(chr(0) || chr(1) || chr(2) || chr(3) || chr(4));
+----
+data:;base64,AAECAwQ=
+
+# =============================================================================
+# from_data_uri - Base64 decoding
+# =============================================================================
+
+query I
+SELECT from_data_uri('data:;base64,aGVsbG8=');
+----
+hello
+
+# Multi-line result - check length
+query I
+SELECT length(from_data_uri('data:;base64,YSxiCjEsMg=='));
+----
+7
+
+# With mediatype (ignored)
+query I
+SELECT from_data_uri('data:text/plain;base64,aGVsbG8=');
+----
+hello
+
+# URL-encoded
+query I
+SELECT from_data_uri('data:,hello%20world');
+----
+hello world
+
+# Empty base64
+query I
+SELECT length(from_data_uri('data:;base64,'));
+----
+0
+
+# =============================================================================
+# from_varchar_uri - Raw VARCHAR extraction
+# =============================================================================
+
+query I
+SELECT from_varchar_uri('data+varchar:hello');
+----
+hello
+
+query I
+SELECT from_varchar_uri('data+varchar:{"debug":true}');
+----
+{"debug":true}
+
+query I
+SELECT length(from_varchar_uri('data+varchar:'));
+----
+0
+
+# =============================================================================
+# from_blob_uri - Escape sequence decoding
+# =============================================================================
+
+query I
+SELECT from_blob_uri('data+blob:hello');
+----
+hello
+
+query I
+SELECT from_blob_uri('data+blob:path\\to\\file');
+----
+path\to\file
+
+# Decodes \n to actual newline - check length
+query I
+SELECT length(from_blob_uri('data+blob:line1\nline2'));
+----
+11
+
+# Tab in result - check length (col1 + tab + col2 = 9 chars)
+query I
+SELECT length(from_blob_uri('data+blob:col1\tcol2'));
+----
+9
+
+query I
+SELECT length(from_blob_uri('data+blob:\0'));
+----
+1
+
+query I
+SELECT from_blob_uri('data+blob:\x41\x42\x43');
+----
+ABC
+
+# =============================================================================
+# from_scalarfs_uri - Auto-detect and decode
+# =============================================================================
+
+query I
+SELECT from_scalarfs_uri('data:;base64,aGVsbG8=');
+----
+hello
+
+query I
+SELECT from_scalarfs_uri('data+varchar:hello');
+----
+hello
+
+query I
+SELECT from_scalarfs_uri('data+blob:hello');
+----
+hello
+
+# =============================================================================
+# Round-trip tests
+# =============================================================================
+
+query I
+SELECT from_data_uri(to_data_uri('test content'));
+----
+test content
+
+query I
+SELECT from_varchar_uri(to_varchar_uri('test content'));
+----
+test content
+
+# Round-trip with blob escaping - check length
+query I
+SELECT length(from_blob_uri(to_blob_uri('test
+content')));
+----
+12
+
+query I
+SELECT from_scalarfs_uri(to_scalarfs_uri('any content'));
+----
+any content
+
+# =============================================================================
+# Error cases
+# =============================================================================
+
+statement error
+SELECT from_data_uri('not a data uri');
+----
+Invalid data: URI
+
+statement error
+SELECT from_varchar_uri('data:;base64,xyz');
+----
+Invalid data+varchar: URI
+
+statement error
+SELECT from_blob_uri('data+varchar:test');
+----
+Invalid data+blob: URI
+
+statement error
+SELECT from_blob_uri('data+blob:\x');
+----
+Invalid escape
