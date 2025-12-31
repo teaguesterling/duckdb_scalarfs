@@ -1,0 +1,172 @@
+# name: test/sql/variable_read.test
+# description: Test variable: protocol for reading DuckDB variables as files
+# group: [scalarfs]
+
+require json
+
+require scalarfs
+
+# =============================================================================
+# Basic variable reads
+# =============================================================================
+
+# CSV from variable
+statement ok
+SET VARIABLE csv_data = 'a,b
+1,2
+3,4';
+
+query II
+SELECT * FROM read_csv('variable:csv_data');
+----
+1	2
+3	4
+
+# JSON from variable
+statement ok
+SET VARIABLE config = '{"debug":true,"port":8080}';
+
+query II
+SELECT debug, port FROM read_json('variable:config');
+----
+true	8080
+
+# Plain text from variable
+statement ok
+SET VARIABLE message = 'Hello, World!';
+
+query I
+SELECT content FROM read_text('variable:message');
+----
+Hello, World!
+
+# =============================================================================
+# Variable content with special characters
+# =============================================================================
+
+# Content with newlines and tabs
+statement ok
+SET VARIABLE special = 'line1
+line2	tabbed';
+
+query I
+SELECT length(content) FROM read_text('variable:special');
+----
+18
+
+# Content with quotes
+statement ok
+SET VARIABLE quoted = '{"msg":"hello \"world\""}';
+
+query I
+SELECT msg FROM read_json('variable:quoted');
+----
+hello "world"
+
+# =============================================================================
+# Empty and whitespace content
+# =============================================================================
+
+statement ok
+SET VARIABLE empty_str = '';
+
+query I
+SELECT length(content) FROM read_text('variable:empty_str');
+----
+0
+
+statement ok
+SET VARIABLE whitespace = '   ';
+
+query I
+SELECT length(content) FROM read_text('variable:whitespace');
+----
+3
+
+# =============================================================================
+# Error cases
+# =============================================================================
+
+# Variable not found
+statement error
+SELECT * FROM read_text('variable:nonexistent_var_xyz');
+----
+not found
+
+# NULL variable
+statement ok
+SET VARIABLE null_var = NULL;
+
+statement error
+SELECT * FROM read_text('variable:null_var');
+----
+NULL
+
+# =============================================================================
+# Variable names
+# =============================================================================
+
+# Simple name
+statement ok
+SET VARIABLE simple = 'test';
+
+query I
+SELECT content FROM read_text('variable:simple');
+----
+test
+
+# Name with underscores
+statement ok
+SET VARIABLE my_var_name = 'underscores';
+
+query I
+SELECT content FROM read_text('variable:my_var_name');
+----
+underscores
+
+# Numeric suffix
+statement ok
+SET VARIABLE var123 = 'numbers';
+
+query I
+SELECT content FROM read_text('variable:var123');
+----
+numbers
+
+# =============================================================================
+# Multiple reads from same variable
+# =============================================================================
+
+statement ok
+SET VARIABLE reusable = 'a,b
+1,2';
+
+query II
+SELECT * FROM read_csv('variable:reusable');
+----
+1	2
+
+query II
+SELECT * FROM read_csv('variable:reusable');
+----
+1	2
+
+# =============================================================================
+# Variable update between reads
+# =============================================================================
+
+statement ok
+SET VARIABLE mutable = 'first';
+
+query I
+SELECT content FROM read_text('variable:mutable');
+----
+first
+
+statement ok
+SET VARIABLE mutable = 'second';
+
+query I
+SELECT content FROM read_text('variable:mutable');
+----
+second

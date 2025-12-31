@@ -1,0 +1,149 @@
+# name: test/sql/variable_write.test
+# description: Test variable: protocol for writing to DuckDB variables via COPY
+# group: [scalarfs]
+
+require json
+
+require scalarfs
+
+# =============================================================================
+# Basic COPY TO variable
+# =============================================================================
+
+# Write CSV to variable (USE_TMP_FILE false required for variable: protocol)
+statement ok
+CREATE TABLE t1 AS SELECT 1 as a, 2 as b UNION ALL SELECT 3, 4;
+
+statement ok
+COPY t1 TO 'variable:csv_out' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query I
+SELECT getvariable('csv_out') LIKE '1,2%';
+----
+true
+
+# Write JSON to variable
+statement ok
+COPY t1 TO 'variable:json_out' (FORMAT json, USE_TMP_FILE false);
+
+query I
+SELECT getvariable('json_out') LIKE '{"a":1%';
+----
+true
+
+statement ok
+DROP TABLE t1;
+
+# =============================================================================
+# Round-trip: read -> process -> write -> read
+# =============================================================================
+
+statement ok
+SET VARIABLE orig = 'x,y
+10,20
+30,40';
+
+statement ok
+CREATE TABLE rt AS SELECT * FROM read_csv('variable:orig');
+
+statement ok
+COPY rt TO 'variable:copy' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query II
+SELECT * FROM read_csv('variable:copy');
+----
+10	20
+30	40
+
+statement ok
+DROP TABLE rt;
+
+# =============================================================================
+# Write creates new variable
+# =============================================================================
+
+statement ok
+COPY (SELECT 'hello' as msg) TO 'variable:brand_new_var' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query I
+SELECT getvariable('brand_new_var') LIKE 'hello%';
+----
+true
+
+# =============================================================================
+# Overwrite existing variable
+# =============================================================================
+
+statement ok
+SET VARIABLE overwrite_me = 'old value';
+
+statement ok
+COPY (SELECT 'new value' as v) TO 'variable:overwrite_me' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query I
+SELECT getvariable('overwrite_me') LIKE 'new value%';
+----
+true
+
+# =============================================================================
+# Write multiline content
+# =============================================================================
+
+statement ok
+CREATE TABLE multi AS SELECT 'line1' as text UNION ALL SELECT 'line2' UNION ALL SELECT 'line3';
+
+statement ok
+COPY multi TO 'variable:multiline' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query I
+SELECT length(getvariable('multiline'));
+----
+18
+
+statement ok
+DROP TABLE multi;
+
+# =============================================================================
+# Write with special characters
+# =============================================================================
+
+statement ok
+CREATE TABLE special AS SELECT 'hello,world' as a, 'with"quotes' as b;
+
+statement ok
+COPY special TO 'variable:special_chars' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+# CSV should properly escape the content
+query I
+SELECT getvariable('special_chars') LIKE '%"hello,world"%';
+----
+true
+
+statement ok
+DROP TABLE special;
+
+# =============================================================================
+# Known limitation: USE_TMP_FILE (default behavior) not yet working
+# =============================================================================
+# DuckDB's default COPY behavior writes to a temp file first, then moves it.
+# The move operation (variable:tmp_X -> variable:X) requires cross-filesystem
+# coordination that isn't fully implemented yet.
+#
+# For now, USE_TMP_FILE false is required for variable: writes.
+# TODO: Investigate proper temp file handling for virtual filesystems.
+
+# This test documents the current broken behavior - it should fail
+# Uncomment when fixed:
+# statement ok
+# CREATE TABLE tmp_test AS SELECT 1 as val;
+#
+# statement ok
+# COPY tmp_test TO 'variable:tmp_file_test' (FORMAT csv, HEADER false);
+#
+# query I
+# SELECT getvariable('tmp_file_test') LIKE '1%';
+# ----
+# true
+#
+# statement ok
+# DROP TABLE tmp_test;

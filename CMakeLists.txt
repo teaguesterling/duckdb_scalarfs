@@ -13,6 +13,7 @@ set(EXTENSION_SOURCES
     src/scalarfs_extension.cpp
     src/data_uri_filesystem.cpp
     src/memory_file_handle.cpp
+    src/variable_filesystem.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
