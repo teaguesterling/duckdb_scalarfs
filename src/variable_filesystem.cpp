@@ -4,6 +4,7 @@
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/value.hpp"
+#include "duckdb/function/scalar/string_common.hpp"
 #include "duckdb/main/client_config.hpp"
 
 namespace duckdb {
@@ -119,7 +120,66 @@ unique_ptr<FileHandle> VariableFileSystem::OpenFile(const string &path, FileOpen
 }
 
 vector<OpenFileInfo> VariableFileSystem::Glob(const string &path, FileOpener *opener) {
-	return {OpenFileInfo(path)};
+	// =============================================================================
+	// Glob Implementation for variable: filesystem
+	// =============================================================================
+	//
+	// Enables pattern matching on variable names:
+	//   read_json('variable:config_*')     -> matches config_dev, config_prod, etc.
+	//   read_csv('variable:data_2024_??')  -> matches data_2024_01, data_2024_12, etc.
+	//
+	// Pattern syntax (standard glob):
+	//   *  - matches any sequence of characters
+	//   ?  - matches any single character
+	//   [abc] - matches any character in the set (not yet supported)
+	//
+	// If no glob characters are present, returns the path as-is (standard behavior).
+
+	if (!CanHandleFile(path)) {
+		return {};
+	}
+
+	// Extract the pattern (variable name portion)
+	string pattern = ExtractVariableName(path);
+
+	// If no glob characters, return the path directly
+	// This is the fast path for non-glob access
+	if (!FileSystem::HasGlob(pattern)) {
+		return {OpenFileInfo(path)};
+	}
+
+	// Need client context to enumerate variables
+	auto context = FileOpener::TryGetClientContext(opener);
+	if (!context) {
+		// Without context, can't enumerate variables - fall back to literal path
+		return {OpenFileInfo(path)};
+	}
+
+	// Iterate over all user variables and match against the pattern
+	auto &config = ClientConfig::GetConfig(*context);
+	vector<OpenFileInfo> result;
+
+	for (const auto &entry : config.user_variables) {
+		const string &var_name = entry.first;
+		const Value &var_value = entry.second;
+
+		// Skip NULL variables (they can't be read anyway)
+		if (var_value.IsNull()) {
+			continue;
+		}
+
+		// Match the variable name against the glob pattern
+		if (duckdb::Glob(var_name.c_str(), var_name.size(), pattern.c_str(), pattern.size())) {
+			// Construct the full variable: path for this match
+			result.push_back(OpenFileInfo("variable:" + var_name));
+		}
+	}
+
+	// Sort results for deterministic ordering
+	std::sort(result.begin(), result.end(),
+	          [](const OpenFileInfo &a, const OpenFileInfo &b) { return a.path < b.path; });
+
+	return result;
 }
 
 void VariableFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) {

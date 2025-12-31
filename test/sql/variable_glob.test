@@ -1,0 +1,146 @@
+# name: test/sql/variable_glob.test
+# description: Test variable: filesystem glob pattern matching
+# group: [scalarfs]
+
+require scalarfs
+
+require json
+
+# =============================================================================
+# Basic glob with asterisk (*)
+# =============================================================================
+
+statement ok
+SET VARIABLE config_dev = '{"env":"dev"}';
+
+statement ok
+SET VARIABLE config_prod = '{"env":"prod"}';
+
+statement ok
+SET VARIABLE config_test = '{"env":"test"}';
+
+statement ok
+SET VARIABLE other_var = '{"env":"other"}';
+
+# Glob matching with asterisk - should match 3 config_* variables
+query I
+SELECT count(*) FROM read_json('variable:config_*');
+----
+3
+
+# Verify the values are correct
+query I
+SELECT env FROM read_json('variable:config_*') ORDER BY env;
+----
+dev
+prod
+test
+
+# Non-matching pattern throws error (standard DuckDB behavior)
+statement error
+SELECT count(*) FROM read_json('variable:nonexistent_*');
+----
+No files found that match the pattern
+
+# =============================================================================
+# Glob with question mark (?)
+# =============================================================================
+
+statement ok
+SET VARIABLE data_01 = 'a,b
+1,2';
+
+statement ok
+SET VARIABLE data_02 = 'a,b
+3,4';
+
+statement ok
+SET VARIABLE data_03 = 'a,b
+5,6';
+
+statement ok
+SET VARIABLE data_100 = 'a,b
+7,8';
+
+# ? matches exactly one character - should match 01, 02, 03 but not 100
+query I
+SELECT count(*) FROM read_csv('variable:data_??');
+----
+3
+
+# Verify values
+query II
+SELECT a, b FROM read_csv('variable:data_??') ORDER BY a;
+----
+1	2
+3	4
+5	6
+
+# =============================================================================
+# Combined patterns
+# =============================================================================
+
+statement ok
+SET VARIABLE log_2024_01 = 'jan';
+
+statement ok
+SET VARIABLE log_2024_02 = 'feb';
+
+statement ok
+SET VARIABLE log_2024_12 = 'dec';
+
+statement ok
+SET VARIABLE log_2023_12 = 'old_dec';
+
+# Pattern: log_2024_* should match 3
+query I
+SELECT count(*) FROM read_text('variable:log_2024_*');
+----
+3
+
+# Pattern: log_????_12 should match 2 (2024_12 and 2023_12)
+query I
+SELECT count(*) FROM read_text('variable:log_????_12');
+----
+2
+
+# =============================================================================
+# No glob pattern - exact match behavior
+# =============================================================================
+
+# Without glob characters, should still work as before
+query I
+SELECT env FROM read_json('variable:config_dev');
+----
+dev
+
+# =============================================================================
+# Edge cases
+# =============================================================================
+
+# Pattern with no matches throws error
+statement error
+SELECT count(*) FROM read_json('variable:xyz_*');
+----
+No files found that match the pattern
+
+# Single asterisk matches everything
+query I
+SELECT count(*) >= 10 FROM read_text('variable:*');
+----
+true
+
+# Pattern matching is case-insensitive (DuckDB variables are case-insensitive)
+statement ok
+SET VARIABLE CaseSensitive = 'test';
+
+query I
+SELECT length(content) FROM read_text('variable:casesensitive');
+----
+4
+
+query I
+SELECT length(content) FROM read_text('variable:CASESENSITIVE');
+----
+4
+
