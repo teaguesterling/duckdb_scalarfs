@@ -1,102 +1,354 @@
-# Scalarfs
+# scalarfs — DuckDB Scalar Filesystem Extension
 
-This repository is based on https://github.com/duckdb/extension-template, check it out if you want to build and ship your own DuckDB extension.
+A DuckDB extension that enables reader/writer functions to work with in-memory content: variables and inline literals.
 
----
+## Overview
 
-This extension, Scalarfs, allow you to ... <extension_goal>.
+DuckDB's file functions (`read_csv`, `read_json`, `COPY TO`, etc.) expect file paths. **scalarfs** bridges the gap when your content is already in memory, allowing the same functions to work with:
 
+- **Variables** — Store data in DuckDB variables and read/write them as files
+- **Inline literals** — Embed content directly in your queries without temporary files
 
-## Building
-### Managing dependencies
-DuckDB extensions uses VCPKG for dependency management. Enabling VCPKG is very simple: follow the [installation instructions](https://vcpkg.io/en/getting-started) or just run the following:
-```shell
-git clone https://github.com/Microsoft/vcpkg.git
-./vcpkg/bootstrap-vcpkg.sh
-export VCPKG_TOOLCHAIN_PATH=`pwd`/vcpkg/scripts/buildsystems/vcpkg.cmake
+| Protocol | Purpose | Mode |
+|----------|---------|------|
+| `variable:` | DuckDB variable as file | Read/Write |
+| `data:` | RFC 2397 data URI (base64/url-encoded) | Read |
+| `data+varchar:` | Raw VARCHAR content as file | Read |
+| `data+blob:` | Escaped BLOB content as file | Read |
+
+## Quick Start
+
+```sql
+LOAD scalarfs;
+
+-- Read JSON from a variable
+SET VARIABLE config = '{"debug": true, "port": 8080}';
+SELECT * FROM read_json('variable:config');
+
+-- Read CSV from inline content
+SELECT * FROM read_csv('data+varchar:name,score
+Alice,95
+Bob,87');
+
+-- Write query results to a variable
+COPY (SELECT * FROM my_table WHERE active) TO 'variable:exported' (FORMAT json);
+SELECT getvariable('exported');
 ```
-Note: VCPKG is only required for extensions that want to rely on it for dependency management. If you want to develop an extension without dependencies, or want to do your own dependency management, just skip this step. Note that the example extension uses VCPKG to build with a dependency for instructive purposes, so when skipping this step the build may not work without removing the dependency.
 
-### Build steps
-Now to build the extension, run:
-```sh
+## Installation
+
+### From Source
+
+```bash
+git clone --recurse-submodules https://github.com/your-repo/duckdb_scalarfs
+cd duckdb_scalarfs
 make
 ```
-The main binaries that will be built are:
-```sh
-./build/release/duckdb
-./build/release/test/unittest
-./build/release/extension/scalarfs/scalarfs.duckdb_extension
-```
-- `duckdb` is the binary for the duckdb shell with the extension code automatically loaded.
-- `unittest` is the test runner of duckdb. Again, the extension is already linked into the binary.
-- `scalarfs.duckdb_extension` is the loadable binary as it would be distributed.
 
-## Running the extension
-To run the extension code, simply start the shell with `./build/release/duckdb`.
-
-Now we can use the features from the extension directly in DuckDB. The template contains a single scalar function `scalarfs()` that takes a string arguments and returns a string:
-```
-D select scalarfs('Jane') as result;
-┌───────────────┐
-│    result     │
-│    varchar    │
-├───────────────┤
-│ Scalarfs Jane 🐥 │
-└───────────────┘
+Then in DuckDB:
+```sql
+LOAD 'build/release/extension/scalarfs/scalarfs.duckdb_extension';
 ```
 
-## Running the tests
-Different tests can be created for DuckDB extensions. The primary way of testing DuckDB extensions should be the SQL tests in `./test/sql`. These SQL tests can be run using:
-```sh
+## Protocols
+
+### `variable:` — Variable as File
+
+Read from or write to a DuckDB variable as if it were a file.
+
+#### Reading Variables
+
+```sql
+-- Store CSV data in a variable
+SET VARIABLE my_data = 'name,value
+Alice,100
+Bob,200
+Carol,150';
+
+-- Read it with any file reader
+SELECT * FROM read_csv('variable:my_data');
+-- ┌─────────┬───────┐
+-- │  name   │ value │
+-- │ varchar │ int64 │
+-- ├─────────┼───────┤
+-- │ Alice   │   100 │
+-- │ Bob     │   200 │
+-- │ Carol   │   150 │
+-- └─────────┴───────┘
+
+-- Works with JSON too
+SET VARIABLE users = '[{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]';
+SELECT * FROM read_json('variable:users');
+```
+
+#### Writing to Variables
+
+```sql
+-- Export query results to a variable
+CREATE TABLE sales(product VARCHAR, amount INT);
+INSERT INTO sales VALUES ('Widget', 100), ('Gadget', 200);
+
+COPY sales TO 'variable:sales_csv' (FORMAT csv, HEADER true);
+SELECT getvariable('sales_csv');
+-- product,amount
+-- Widget,100
+-- Gadget,200
+
+-- Export as JSON
+COPY (SELECT * FROM sales WHERE amount > 150) TO 'variable:big_sales' (FORMAT json);
+SELECT getvariable('big_sales');
+-- [{"product":"Gadget","amount":200}]
+```
+
+#### Glob Pattern Matching
+
+Match multiple variables with glob patterns:
+
+```sql
+-- Set up multiple config variables
+SET VARIABLE config_dev = '{"env": "development", "debug": true}';
+SET VARIABLE config_prod = '{"env": "production", "debug": false}';
+SET VARIABLE config_test = '{"env": "testing", "debug": true}';
+
+-- Read all config_* variables at once
+SELECT * FROM read_json('variable:config_*');
+-- ┌─────────────┬─────────┐
+-- │     env     │  debug  │
+-- │   varchar   │ boolean │
+-- ├─────────────┼─────────┤
+-- │ development │ true    │
+-- │ production  │ false   │
+-- │ testing     │ true    │
+-- └─────────────┴─────────┘
+
+-- Use ? for single-character wildcards
+SET VARIABLE data_01 = 'a,b\n1,2';
+SET VARIABLE data_02 = 'a,b\n3,4';
+SET VARIABLE data_100 = 'a,b\n5,6';
+
+SELECT * FROM read_csv('variable:data_??');  -- Matches data_01, data_02 (not data_100)
+```
+
+### `data+varchar:` — Raw Inline Content
+
+Embed content directly in your query with zero encoding overhead.
+
+```sql
+-- Inline JSON
+SELECT * FROM read_json('data+varchar:{"name": "Alice", "age": 30}');
+
+-- Inline CSV (newlines work naturally in SQL strings)
+SELECT * FROM read_csv('data+varchar:col1,col2,col3
+1,2,3
+4,5,6
+7,8,9');
+
+-- Quick test data
+SELECT * FROM read_json('data+varchar:[
+  {"id": 1, "status": "active"},
+  {"id": 2, "status": "pending"},
+  {"id": 3, "status": "complete"}
+]');
+```
+
+### `data:` — RFC 2397 Data URIs
+
+Standard data URI format with base64 or URL encoding.
+
+```sql
+-- Base64 encoded (good for binary or complex content)
+SELECT * FROM read_csv('data:;base64,bmFtZSxzY29yZQpBbGljZSw5NQpCb2IsODc=');
+
+-- URL encoded
+SELECT * FROM read_csv('data:,name%2Cscore%0AAlice%2C95%0ABob%2C87');
+
+-- With media type (ignored by readers, but valid syntax)
+SELECT * FROM read_json('data:application/json;base64,eyJrZXkiOiJ2YWx1ZSJ9');
+```
+
+### `data+blob:` — Escaped Binary Content
+
+For content with control characters, using simple escape sequences.
+
+```sql
+-- Content with escape sequences
+SELECT * FROM read_text('data+blob:line1\nline2\nline3');
+
+-- Supported escapes: \n \r \t \0 \\ \xNN
+SELECT * FROM read_text('data+blob:tab\there\nnewline\nand hex: \x41\x42\x43');
+```
+
+## Helper Functions
+
+Convert between content and URIs programmatically:
+
+### Encoding Functions
+
+```sql
+-- Base64 data URI
+SELECT to_data_uri('hello world');
+-- data:;base64,aGVsbG8gd29ybGQ=
+
+-- Raw varchar URI (zero overhead)
+SELECT to_varchar_uri('{"key": "value"}');
+-- data+varchar:{"key": "value"}
+
+-- Escaped blob URI
+SELECT to_blob_uri('line1\nline2');
+-- data+blob:line1\nline2
+
+-- Auto-select optimal encoding
+SELECT to_scalarfs_uri('simple text');      -- Uses data+varchar:
+SELECT to_scalarfs_uri(chr(0) || chr(1));   -- Uses data:;base64,
+```
+
+### Decoding Functions
+
+```sql
+-- Decode any scalarfs URI
+SELECT from_data_uri('data:;base64,aGVsbG8=');           -- hello
+SELECT from_varchar_uri('data+varchar:hello');           -- hello
+SELECT from_blob_uri('data+blob:line1\nline2');          -- line1<newline>line2
+SELECT from_scalarfs_uri('data+varchar:auto-detected');  -- auto-detected
+```
+
+### Auto-Selection Logic
+
+`to_scalarfs_uri()` picks the optimal encoding automatically:
+
+| Content Type | Chosen Protocol | Reason |
+|--------------|-----------------|--------|
+| Safe text (printable + whitespace) | `data+varchar:` | Zero overhead |
+| Text with few control chars (<10%) | `data+blob:` | Minimal escaping |
+| Binary or heavy escaping needed | `data:;base64,` | Predictable 33% overhead |
+
+## Use Cases
+
+### Inline Test Data
+
+```sql
+-- Quick tests without creating files
+SELECT * FROM read_csv('data+varchar:id,name,email
+1,Alice,alice@example.com
+2,Bob,bob@example.com')
+WHERE name LIKE 'A%';
+```
+
+### Configuration Management
+
+```sql
+-- Store configuration in variables
+SET VARIABLE app_config = '{
+  "database": {"host": "localhost", "port": 5432},
+  "cache": {"enabled": true, "ttl": 3600}
+}';
+
+-- Access nested configuration
+SELECT config.database.host, config.cache.ttl
+FROM read_json('variable:app_config') AS config;
+```
+
+### Pipeline Intermediate Results
+
+```sql
+-- Process data through multiple steps using variables
+SET VARIABLE raw_data = '...';
+
+-- Step 1: Parse and filter
+COPY (
+  SELECT * FROM read_json('variable:raw_data')
+  WHERE status = 'active'
+) TO 'variable:filtered' (FORMAT json);
+
+-- Step 2: Aggregate
+COPY (
+  SELECT category, count(*) as cnt
+  FROM read_json('variable:filtered')
+  GROUP BY category
+) TO 'variable:summary' (FORMAT json);
+
+-- Final result
+SELECT * FROM read_json('variable:summary');
+```
+
+### Transparent Storage Facade
+
+Store paths that could point to inline data, local files, or remote storage:
+
+```sql
+CREATE TABLE documents(
+  id INT,
+  content_path VARCHAR  -- Could be any of these:
+);
+
+-- Inline small content
+INSERT INTO documents VALUES (1, 'data+varchar:{"type": "note", "text": "Hello"}');
+
+-- Local file
+INSERT INTO documents VALUES (2, '/data/documents/report.json');
+
+-- S3
+INSERT INTO documents VALUES (3, 's3://bucket/documents/large.json');
+
+-- All work transparently with read_json()
+SELECT id, doc.* FROM documents, read_json(content_path) AS doc;
+```
+
+## Building from Source
+
+### Prerequisites
+
+- CMake 3.14+
+- C++17 compiler
+- Git
+
+### Build Steps
+
+```bash
+# Clone with submodules
+git clone --recurse-submodules https://github.com/your-repo/duckdb_scalarfs
+cd duckdb_scalarfs
+
+# Build
+make
+
+# Run tests
 make test
 ```
 
-### Installing the deployed binaries
-To install your extension binaries from S3, you will need to do two things. Firstly, DuckDB should be launched with the
-`allow_unsigned_extensions` option set to true. How to set this will depend on the client you're using. Some examples:
-
-CLI:
-```shell
-duckdb -unsigned
-```
-
-Python:
-```python
-con = duckdb.connect(':memory:', config={'allow_unsigned_extensions' : 'true'})
-```
-
-NodeJS:
-```js
-db = new duckdb.Database(':memory:', {"allow_unsigned_extensions": "true"});
-```
-
-Secondly, you will need to set the repository endpoint in DuckDB to the HTTP url of your bucket + version of the extension
-you want to install. To do this run the following SQL query in DuckDB:
-```sql
-SET custom_extension_repository='bucket.s3.eu-west-1.amazonaws.com/<your_extension_name>/latest';
-```
-Note that the `/latest` path will allow you to install the latest extension version available for your current version of
-DuckDB. To specify a specific version, you can pass the version instead.
-
-After running these steps, you can install and load your extension using the regular INSTALL/LOAD commands in DuckDB:
-```sql
-INSTALL scalarfs;
-LOAD scalarfs;
-```
-
-## Setting up CLion
-
-### Opening project
-Configuring CLion with this extension requires a little work. Firstly, make sure that the DuckDB submodule is available.
-Then make sure to open `./duckdb/CMakeLists.txt` (so not the top level `CMakeLists.txt` file from this repo) as a project in CLion.
-Now to fix your project path go to `tools->CMake->Change Project Root`([docs](https://www.jetbrains.com/help/clion/change-project-root-directory.html)) to set the project root to the root dir of this repo.
-
-### Debugging
-To set up debugging in CLion, there are two simple steps required. Firstly, in `CLion -> Settings / Preferences -> Build, Execution, Deploy -> CMake` you will need to add the desired builds (e.g. Debug, Release, RelDebug, etc). There's different ways to configure this, but the easiest is to leave all empty, except the `build path`, which needs to be set to `../build/{build type}`, and CMake Options to which the following flag should be added, with the path to the extension CMakeList:
+### Build Outputs
 
 ```
--DDUCKDB_EXTENSION_CONFIGS=<path_to_the_exentension_CMakeLists.txt>
+build/release/duckdb                                    # DuckDB shell with extension
+build/release/test/unittest                             # Test runner
+build/release/extension/scalarfs/scalarfs.duckdb_extension  # Loadable extension
 ```
 
-The second step is to configure the unittest runner as a run/debug configuration. To do this, go to `Run -> Edit Configurations` and click `+ -> Cmake Application`. The target and executable should be `unittest`. This will run all the DuckDB tests. To specify only running the extension specific tests, add `--test-dir ../../.. [sql]` to the `Program Arguments`. Note that it is recommended to use the `unittest` executable for testing/development within CLion. The actual DuckDB CLI currently does not reliably work as a run target in CLion.
+## Running Tests
+
+```bash
+# Run all extension tests
+make test
+
+# Run specific test file
+./build/release/test/unittest "test/sql/variable_glob.test"
+
+# Run all SQL tests
+./build/release/test/unittest "[sql]"
+```
+
+## Limitations
+
+- **Content size**: Limited by DuckDB's VARCHAR/BLOB size limits and available memory
+- **No streaming**: Entire content is buffered before reading
+- **Write support**: Only `variable:` protocol supports writing
+- **No null bytes in VARCHAR**: Use `data+blob:` or `data:;base64,` for binary content
+
+## License
+
+MIT
+
+## Related
+
+- [DuckDB](https://duckdb.org/) — The database engine
+- [RFC 2397](https://datatracker.ietf.org/doc/html/rfc2397) — The data: URL scheme specification
