@@ -13,8 +13,7 @@ namespace duckdb {
 // =============================================================================
 
 bool DataURIFileSystem::CanHandleFile(const string &fpath) {
-	return StringUtil::StartsWith(fpath, "data:") ||
-	       StringUtil::StartsWith(fpath, "data+varchar:") ||
+	return StringUtil::StartsWith(fpath, "data:") || StringUtil::StartsWith(fpath, "data+varchar:") ||
 	       StringUtil::StartsWith(fpath, "data+blob:");
 }
 
@@ -23,7 +22,7 @@ string DataURIFileSystem::GetName() const {
 }
 
 unique_ptr<FileHandle> DataURIFileSystem::OpenFile(const string &path, FileOpenFlags flags,
-                                                    optional_ptr<FileOpener> opener) {
+                                                   optional_ptr<FileOpener> opener) {
 	if (flags.OpenForWriting()) {
 		throw IOException("Data URIs are read-only");
 	}
@@ -238,23 +237,21 @@ string DataURIFileSystem::DecodeBlobEscapes(const string &input) {
 		case 'x': {
 			// Hex escape: \xNN
 			if (i + 3 >= input.size()) {
-				throw IOException("Invalid \\x escape at position %llu: expected 2 hex digits",
-				                  (unsigned long long)i);
+				throw IOException("Invalid \\x escape at position %llu: expected 2 hex digits", (unsigned long long)i);
 			}
 			char hex[3] = {input[i + 2], input[i + 3], '\0'};
 			char *end;
 			long val = strtol(hex, &end, 16);
 			if (end != hex + 2) {
-				throw IOException("Invalid \\x escape at position %llu: '%s' is not valid hex",
-				                  (unsigned long long)i, hex);
+				throw IOException("Invalid \\x escape at position %llu: '%s' is not valid hex", (unsigned long long)i,
+				                  hex);
 			}
 			result += static_cast<char>(val);
 			i += 3;
 			break;
 		}
 		default:
-			throw IOException("Invalid escape sequence '\\%c' at position %llu", next,
-			                  (unsigned long long)i);
+			throw IOException("Invalid escape sequence '\\%c' at position %llu", next, (unsigned long long)i);
 		}
 	}
 

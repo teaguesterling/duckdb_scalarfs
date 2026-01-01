@@ -187,8 +187,8 @@ static string DecodeBlobUri(const string_t &input) {
 						result += static_cast<char>(val);
 						i += 3;
 					} else {
-						throw InvalidInputException("Invalid escape sequence '\\x%c%c' at position %d",
-						                            content[i + 2], content[i + 3], i);
+						throw InvalidInputException("Invalid escape sequence '\\x%c%c' at position %d", content[i + 2],
+						                            content[i + 3], i);
 					}
 				} else {
 					throw InvalidInputException("Invalid escape sequence - incomplete \\x at position %d", i);

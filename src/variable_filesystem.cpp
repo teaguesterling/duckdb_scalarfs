@@ -66,8 +66,7 @@ bool VariableFileSystem::CanHandleFile(const string &fpath) {
 	// Without handling tmp_variable:, the temp file would go to the local filesystem,
 	// then the move operation would fail (cross-filesystem move from local to our virtual FS).
 	// By handling tmp_variable: here, the entire temp file flow stays within our filesystem.
-	return StringUtil::StartsWith(fpath, "variable:") ||
-	       StringUtil::StartsWith(fpath, "tmp_variable:");
+	return StringUtil::StartsWith(fpath, "variable:") || StringUtil::StartsWith(fpath, "tmp_variable:");
 }
 
 string VariableFileSystem::GetName() const {
@@ -92,7 +91,7 @@ string VariableFileSystem::ExtractVariableName(const string &path) {
 }
 
 unique_ptr<FileHandle> VariableFileSystem::OpenFile(const string &path, FileOpenFlags flags,
-                                                     optional_ptr<FileOpener> opener) {
+                                                    optional_ptr<FileOpener> opener) {
 	string var_name = ExtractVariableName(path);
 
 	auto context = FileOpener::TryGetClientContext(opener);

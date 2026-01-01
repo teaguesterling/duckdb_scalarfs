@@ -1,6 +1,6 @@
 # name: test/sql/stress_and_security.test
 # description: Stress tests, boundary conditions, and security tests
-# group: [scalarfs]
+# group: [sql]
 
 require scalarfs
 

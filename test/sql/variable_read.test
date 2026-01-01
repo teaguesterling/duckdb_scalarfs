@@ -1,6 +1,6 @@
 # name: test/sql/variable_read.test
 # description: Test variable: protocol for reading DuckDB variables as files
-# group: [scalarfs]
+# group: [sql]
 
 require json
 

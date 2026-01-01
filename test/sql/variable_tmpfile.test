@@ -1,6 +1,6 @@
 # name: test/sql/variable_tmpfile.test
 # description: Test variable: protocol with USE_TMP_FILE true (default behavior)
-# group: [scalarfs]
+# group: [sql]
 
 require scalarfs
 

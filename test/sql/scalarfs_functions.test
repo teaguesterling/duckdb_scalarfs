@@ -1,6 +1,6 @@
 # name: test/sql/scalarfs_functions.test
 # description: Test scalarfs encoding/decoding helper functions
-# group: [scalarfs]
+# group: [sql]
 
 require scalarfs
 

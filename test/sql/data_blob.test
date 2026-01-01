@@ -1,6 +1,6 @@
 # name: test/sql/data_blob.test
 # description: Test data+blob: URI protocol (escaped content)
-# group: [scalarfs]
+# group: [sql]
 
 require json
 

@@ -1,6 +1,6 @@
 # name: test/sql/data_uri.test
 # description: Test data: URI protocol (RFC 2397)
-# group: [scalarfs]
+# group: [sql]
 
 require json
 

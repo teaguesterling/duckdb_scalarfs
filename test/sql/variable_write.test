@@ -1,6 +1,6 @@
 # name: test/sql/variable_write.test
 # description: Test variable: protocol for writing to DuckDB variables via COPY
-# group: [scalarfs]
+# group: [sql]
 
 require json
 

@@ -1,6 +1,6 @@
 # name: test/sql/variable_glob.test
 # description: Test variable: filesystem glob pattern matching
-# group: [scalarfs]
+# group: [sql]
 
 require scalarfs
 
