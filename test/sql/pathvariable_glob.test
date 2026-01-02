@@ -1,0 +1,162 @@
+# name: test/sql/pathvariable_glob.test
+# description: Test pathvariable: protocol with two-level glob support
+# group: [sql]
+
+require scalarfs
+
+# =============================================================================
+# Setup: Create test files
+# =============================================================================
+
+statement ok
+COPY (SELECT 'file1' as src, 1 as value)
+TO '__pathvar_glob_file1.csv' (FORMAT csv, HEADER true);
+
+statement ok
+COPY (SELECT 'file2' as src, 2 as value)
+TO '__pathvar_glob_file2.csv' (FORMAT csv, HEADER true);
+
+statement ok
+COPY (SELECT 'file3' as src, 3 as value)
+TO '__pathvar_glob_file3.csv' (FORMAT csv, HEADER true);
+
+# =============================================================================
+# Level 1: Glob on variable names
+# =============================================================================
+
+# Set up path variables with pattern-matchable names
+statement ok
+SET VARIABLE data_path_01 = '__pathvar_glob_file1.csv';
+
+statement ok
+SET VARIABLE data_path_02 = '__pathvar_glob_file2.csv';
+
+statement ok
+SET VARIABLE data_path_03 = '__pathvar_glob_file3.csv';
+
+# Glob matches variable names, then reads from paths stored in those variables
+query II
+SELECT src, value FROM read_csv('pathvariable:data_path_*') ORDER BY value;
+----
+file1	1
+file2	2
+file3	3
+
+# Single character wildcard on variable names
+query II
+SELECT src, value FROM read_csv('pathvariable:data_path_0?') ORDER BY value;
+----
+file1	1
+file2	2
+file3	3
+
+# Glob with specific pattern on variable names
+statement ok
+SET VARIABLE config_dev_path = '__pathvar_glob_file1.csv';
+
+statement ok
+SET VARIABLE config_prod_path = '__pathvar_glob_file2.csv';
+
+query II
+SELECT src, value FROM read_csv('pathvariable:config_*_path') ORDER BY value;
+----
+file1	1
+file2	2
+
+# =============================================================================
+# Level 2: Glob within path stored in variable
+# =============================================================================
+
+# Variable contains a glob pattern - should expand to multiple files
+statement ok
+SET VARIABLE glob_pattern_path = '__pathvar_glob_file*.csv';
+
+query II
+SELECT src, value FROM read_csv('pathvariable:glob_pattern_path') ORDER BY value;
+----
+file1	1
+file2	2
+file3	3
+
+# Single character wildcard in path
+statement ok
+SET VARIABLE glob_single_path = '__pathvar_glob_file?.csv';
+
+query II
+SELECT src, value FROM read_csv('pathvariable:glob_single_path') ORDER BY value;
+----
+file1	1
+file2	2
+file3	3
+
+# =============================================================================
+# Two-level glob: glob on variable names AND paths
+# =============================================================================
+
+# Multiple variables, each containing a glob pattern
+statement ok
+SET VARIABLE batch_a_path = '__pathvar_glob_file1.csv';
+
+statement ok
+SET VARIABLE batch_b_path = '__pathvar_glob_file2.csv';
+
+# This should: 1) match batch_*_path variables, 2) expand any globs in those paths
+query II
+SELECT src, value FROM read_csv('pathvariable:batch_*_path') ORDER BY value;
+----
+file1	1
+file2	2
+
+# More complex: variables with overlapping glob patterns
+# Create additional files for this test
+statement ok
+COPY (SELECT 'extra1' as src, 10 as value)
+TO '__pathvar_glob_extra1.csv' (FORMAT csv, HEADER true);
+
+statement ok
+COPY (SELECT 'extra2' as src, 20 as value)
+TO '__pathvar_glob_extra2.csv' (FORMAT csv, HEADER true);
+
+statement ok
+SET VARIABLE all_files_path = '__pathvar_glob_file*.csv';
+
+statement ok
+SET VARIABLE all_extras_path = '__pathvar_glob_extra*.csv';
+
+# Glob on variable names, each variable contains a glob path
+query II
+SELECT src, value FROM read_csv('pathvariable:all_*_path') ORDER BY value;
+----
+file1	1
+file2	2
+file3	3
+extra1	10
+extra2	20
+
+# =============================================================================
+# Edge cases
+# =============================================================================
+
+# Glob with no variable matches - throws error (DuckDB behavior)
+statement error
+SELECT count(*) FROM read_csv('pathvariable:nonexistent_pattern_*');
+----
+No files found
+
+# Single variable, path glob matches no files - throws error
+statement ok
+SET VARIABLE empty_glob_path = '__pathvar_no_match_*.csv';
+
+statement error
+SELECT count(*) FROM read_csv('pathvariable:empty_glob_path');
+----
+No files found
+
+# Variable with non-glob path (exact match)
+statement ok
+SET VARIABLE exact_path = '__pathvar_glob_file1.csv';
+
+query II
+SELECT src, value FROM read_csv('pathvariable:exact_path');
+----
+file1	1

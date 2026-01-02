@@ -1,0 +1,144 @@
+# name: test/sql/pathvariable_write.test
+# description: Test pathvariable: protocol for writing files via paths stored in variables
+# group: [sql]
+
+require json
+
+require scalarfs
+
+# =============================================================================
+# Basic COPY TO pathvariable (USE_TMP_FILE false for simpler case)
+# =============================================================================
+
+# Write CSV to path stored in variable
+statement ok
+SET VARIABLE out_csv_path = '__pathvar_write_test.csv';
+
+statement ok
+CREATE TABLE t1 AS SELECT 1 as a, 2 as b UNION ALL SELECT 3, 4;
+
+statement ok
+COPY t1 TO 'pathvariable:out_csv_path' (FORMAT csv, HEADER true, USE_TMP_FILE false);
+
+# Verify the file was written by reading it back via pathvariable:
+query II
+SELECT * FROM read_csv('pathvariable:out_csv_path');
+----
+1	2
+3	4
+
+# Also verify we can read it directly (same path)
+query II
+SELECT * FROM read_csv('__pathvar_write_test.csv');
+----
+1	2
+3	4
+
+statement ok
+DROP TABLE t1;
+
+# =============================================================================
+# Write JSON to pathvariable
+# =============================================================================
+
+statement ok
+SET VARIABLE out_json_path = '__pathvar_write_test.json';
+
+statement ok
+CREATE TABLE t2 AS SELECT 'Alice' as name, 30 as age UNION ALL SELECT 'Bob', 25;
+
+statement ok
+COPY t2 TO 'pathvariable:out_json_path' (FORMAT json, USE_TMP_FILE false);
+
+query II
+SELECT * FROM read_json('pathvariable:out_json_path');
+----
+Alice	30
+Bob	25
+
+statement ok
+DROP TABLE t2;
+
+# =============================================================================
+# Round-trip: read -> process -> write via pathvariable -> read
+# =============================================================================
+
+# Create initial file
+statement ok
+COPY (SELECT 10 as x, 20 as y UNION ALL SELECT 30, 40)
+TO '__pathvar_roundtrip_input.csv' (FORMAT csv, HEADER true);
+
+statement ok
+SET VARIABLE input_path = '__pathvar_roundtrip_input.csv';
+
+statement ok
+SET VARIABLE output_path = '__pathvar_roundtrip_output.csv';
+
+# Read from path variable, transform, write to another path variable
+statement ok
+CREATE TABLE rt AS SELECT x * 2 as x, y * 2 as y FROM read_csv('pathvariable:input_path');
+
+statement ok
+COPY rt TO 'pathvariable:output_path' (FORMAT csv, HEADER true, USE_TMP_FILE false);
+
+query II
+SELECT * FROM read_csv('pathvariable:output_path');
+----
+20	40
+60	80
+
+statement ok
+DROP TABLE rt;
+
+# =============================================================================
+# Overwrite existing file
+# =============================================================================
+
+statement ok
+SET VARIABLE overwrite_path = '__pathvar_overwrite_test.csv';
+
+# Create initial file
+statement ok
+COPY (SELECT 'old' as value) TO 'pathvariable:overwrite_path' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query I
+SELECT * FROM read_csv('pathvariable:overwrite_path', columns={'value': 'VARCHAR'}, header=false);
+----
+old
+
+# Overwrite with new content
+statement ok
+COPY (SELECT 'new' as value) TO 'pathvariable:overwrite_path' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query I
+SELECT * FROM read_csv('pathvariable:overwrite_path', columns={'value': 'VARCHAR'}, header=false);
+----
+new
+
+# =============================================================================
+# Error cases for writing
+# =============================================================================
+
+# Variable not found
+statement error
+COPY (SELECT 1 as a) TO 'pathvariable:nonexistent_write_var' (FORMAT csv);
+----
+not found
+
+# NULL variable
+statement ok
+SET VARIABLE null_write_path = NULL;
+
+statement error
+COPY (SELECT 1 as a) TO 'pathvariable:null_write_path' (FORMAT csv);
+----
+NULL
+
+# Non-string variable type
+statement ok
+SET VARIABLE int_write_path = 123;
+
+statement error
+COPY (SELECT 1 as a) TO 'pathvariable:int_write_path' (FORMAT csv);
+----
+must be VARCHAR or BLOB

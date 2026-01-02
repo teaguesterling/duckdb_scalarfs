@@ -14,6 +14,7 @@ set(EXTENSION_SOURCES
     src/data_uri_filesystem.cpp
     src/memory_file_handle.cpp
     src/variable_filesystem.cpp
+    src/pathvariable_filesystem.cpp
     src/scalarfs_functions.cpp
 )
 

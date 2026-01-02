@@ -1,0 +1,109 @@
+# name: test/sql/pathvariable_tmpfile.test
+# description: Test pathvariable: protocol with USE_TMP_FILE true (default behavior)
+# group: [sql]
+
+require json
+
+require scalarfs
+
+# =============================================================================
+# Test: Basic write with temp file (default behavior)
+# =============================================================================
+
+# Test COPY with default USE_TMP_FILE (should be true)
+statement ok
+SET VARIABLE tmpfile_out_path = '__pathvar_tmpfile_test.csv';
+
+statement ok
+CREATE TABLE t1 AS SELECT 'hello' as msg;
+
+# This uses temp file by default - tests tmp_pathvariable: handling
+statement ok
+COPY t1 TO 'pathvariable:tmpfile_out_path' (FORMAT csv, HEADER false);
+
+# Verify the file was written correctly
+query I
+SELECT * FROM read_csv('pathvariable:tmpfile_out_path', columns={'msg': 'VARCHAR'}, header=false);
+----
+hello
+
+# Also verify via direct path
+query I
+SELECT * FROM read_csv('__pathvar_tmpfile_test.csv', columns={'msg': 'VARCHAR'}, header=false);
+----
+hello
+
+statement ok
+DROP TABLE t1;
+
+# =============================================================================
+# Test: Overwrite existing file with temp file
+# =============================================================================
+
+statement ok
+SET VARIABLE tmpfile_overwrite_path = '__pathvar_tmpfile_overwrite.csv';
+
+# Create initial file (without temp file for simplicity)
+statement ok
+COPY (SELECT 'old value' as v) TO 'pathvariable:tmpfile_overwrite_path' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query I
+SELECT * FROM read_csv('pathvariable:tmpfile_overwrite_path', columns={'v': 'VARCHAR'}, header=false);
+----
+old value
+
+# Overwrite using temp file (default behavior)
+statement ok
+CREATE TABLE t2 AS SELECT 'new value' as v;
+
+statement ok
+COPY t2 TO 'pathvariable:tmpfile_overwrite_path' (FORMAT csv, HEADER false);
+
+query I
+SELECT * FROM read_csv('pathvariable:tmpfile_overwrite_path', columns={'v': 'VARCHAR'}, header=false);
+----
+new value
+
+statement ok
+DROP TABLE t2;
+
+# =============================================================================
+# Test: Write JSON with temp file
+# =============================================================================
+
+statement ok
+SET VARIABLE tmpfile_json_path = '__pathvar_tmpfile_test.json';
+
+statement ok
+COPY (SELECT 'Alice' as name, 30 as age) TO 'pathvariable:tmpfile_json_path' (FORMAT json);
+
+query II
+SELECT * FROM read_json('pathvariable:tmpfile_json_path');
+----
+Alice	30
+
+# =============================================================================
+# Test: Multiple writes with temp files
+# =============================================================================
+
+statement ok
+SET VARIABLE multi_path_1 = '__pathvar_multi_1.csv';
+
+statement ok
+SET VARIABLE multi_path_2 = '__pathvar_multi_2.csv';
+
+statement ok
+COPY (SELECT 1 as a) TO 'pathvariable:multi_path_1' (FORMAT csv, HEADER false);
+
+statement ok
+COPY (SELECT 2 as a) TO 'pathvariable:multi_path_2' (FORMAT csv, HEADER false);
+
+query I
+SELECT * FROM read_csv('pathvariable:multi_path_1', columns={'a': 'INT'}, header=false);
+----
+1
+
+query I
+SELECT * FROM read_csv('pathvariable:multi_path_2', columns={'a': 'INT'}, header=false);
+----
+2

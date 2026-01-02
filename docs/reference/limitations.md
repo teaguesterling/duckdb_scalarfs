@@ -46,11 +46,12 @@ SELECT * FROM read_csv('variable:large_csv') LIMIT 10;
 
 ## Write Support
 
-Only `variable:` supports writing:
+Only `variable:` and `pathvariable:` support writing:
 
 | Protocol | Read | Write |
 |----------|------|-------|
 | `variable:` | ✅ | ✅ |
+| `pathvariable:` | ✅ | ✅ |
 | `data:` | ✅ | ❌ |
 | `data+varchar:` | ✅ | ❌ |
 | `data+blob:` | ✅ | ❌ |
@@ -58,6 +59,10 @@ Only `variable:` supports writing:
 ```sql
 -- Works
 COPY my_table TO 'variable:output' (FORMAT csv);
+
+-- Works (writes to the file at the path stored in the variable)
+SET VARIABLE out_path = '/tmp/output.csv';
+COPY my_table TO 'pathvariable:out_path' (FORMAT csv);
 
 -- Does NOT work
 COPY my_table TO 'data+varchar:output' (FORMAT csv);
@@ -95,16 +100,30 @@ SELECT length(to_blob_uri(chr(0) || chr(1) || chr(2) || chr(3)));
 
 ## Pattern Matching
 
-### Variable Protocol Only
+### Variable and PathVariable Protocols Only
 
-Glob patterns only work with `variable:`:
+Glob patterns only work with `variable:` and `pathvariable:`:
 
 ```sql
--- Works
+-- Works: variable protocol
 SELECT * FROM read_json('variable:config_*');
+
+-- Works: pathvariable protocol (two-level globs)
+SET VARIABLE input_2024 = '/data/2024/*.csv';
+SELECT * FROM read_csv('pathvariable:input_*');
 
 -- Does NOT work (asterisk is literal)
 SELECT * FROM read_json('data+varchar:*');
+```
+
+### pathvariable: Type Restrictions
+
+The variable must contain a VARCHAR or BLOB value to be used as a path:
+
+```sql
+SET VARIABLE int_val = 42;
+SELECT * FROM read_text('pathvariable:int_val');
+-- Error: Variable 'int_val' must be VARCHAR or BLOB type
 ```
 
 ### Case Sensitivity

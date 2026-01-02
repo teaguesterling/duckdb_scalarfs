@@ -1,0 +1,181 @@
+# name: test/sql/pathvariable_read.test
+# description: Test pathvariable: protocol for reading files via paths stored in variables
+# group: [sql]
+
+require json
+
+require scalarfs
+
+# =============================================================================
+# Setup: Create test files in working directory
+# =============================================================================
+
+statement ok
+COPY (SELECT 'a,b' || chr(10) || '1,2' || chr(10) || '3,4' AS content)
+TO '__pathvar_test_data.csv' (FORMAT csv, HEADER false, QUOTE '');
+
+statement ok
+COPY (SELECT '{"name":"Alice","age":30}' AS content)
+TO '__pathvar_test_data.json' (FORMAT csv, HEADER false, QUOTE '');
+
+statement ok
+COPY (SELECT 'Hello, World!' AS content)
+TO '__pathvar_test_data.txt' (FORMAT csv, HEADER false, QUOTE '');
+
+# =============================================================================
+# Basic pathvariable reads
+# =============================================================================
+
+# CSV file path in variable
+statement ok
+SET VARIABLE csv_path = '__pathvar_test_data.csv';
+
+query II
+SELECT * FROM read_csv('pathvariable:csv_path');
+----
+1	2
+3	4
+
+# JSON file path in variable
+statement ok
+SET VARIABLE json_path = '__pathvar_test_data.json';
+
+query II
+SELECT name, age FROM read_json('pathvariable:json_path');
+----
+Alice	30
+
+# Text file path in variable
+statement ok
+SET VARIABLE text_path = '__pathvar_test_data.txt';
+
+query I
+SELECT rtrim(content, chr(10)) FROM read_text('pathvariable:text_path');
+----
+Hello, World!
+
+# =============================================================================
+# Variable names with underscores and numbers
+# =============================================================================
+
+statement ok
+SET VARIABLE my_data_path_01 = '__pathvar_test_data.csv';
+
+query I
+SELECT count(*) FROM read_csv('pathvariable:my_data_path_01');
+----
+2
+
+# =============================================================================
+# Error cases
+# =============================================================================
+
+# Variable not found
+statement error
+SELECT * FROM read_text('pathvariable:nonexistent_path_var');
+----
+not found
+
+# NULL variable
+statement ok
+SET VARIABLE null_path = NULL;
+
+statement error
+SELECT * FROM read_text('pathvariable:null_path');
+----
+NULL
+
+# Path in variable points to non-existent file
+statement ok
+SET VARIABLE bad_path = '/nonexistent/path/to/file.txt';
+
+statement error
+SELECT * FROM read_text('pathvariable:bad_path');
+----
+No such file or directory
+
+# =============================================================================
+# Type validation: non-VARCHAR/BLOB types should fail
+# =============================================================================
+
+statement ok
+SET VARIABLE int_path = 42;
+
+statement error
+SELECT * FROM read_text('pathvariable:int_path');
+----
+must be VARCHAR or BLOB
+
+statement ok
+SET VARIABLE list_path = [1, 2, 3];
+
+statement error
+SELECT * FROM read_text('pathvariable:list_path');
+----
+must be VARCHAR or BLOB
+
+# =============================================================================
+# Path variable pointing to other protocols
+# =============================================================================
+
+# Variable containing a data+varchar: URI (should work transparently)
+statement ok
+SET VARIABLE inline_path = 'data+varchar:inline,data
+1,2
+3,4';
+
+query II
+SELECT * FROM read_csv('pathvariable:inline_path');
+----
+1	2
+3	4
+
+# Variable containing a variable: URI (nested protocols)
+statement ok
+SET VARIABLE nested_content = 'x,y
+10,20';
+
+statement ok
+SET VARIABLE nested_path = 'variable:nested_content';
+
+query II
+SELECT * FROM read_csv('pathvariable:nested_path');
+----
+10	20
+
+# =============================================================================
+# Multiple reads from same path variable
+# =============================================================================
+
+statement ok
+SET VARIABLE reusable_path = '__pathvar_test_data.csv';
+
+query I
+SELECT count(*) FROM read_csv('pathvariable:reusable_path');
+----
+2
+
+query I
+SELECT count(*) FROM read_csv('pathvariable:reusable_path');
+----
+2
+
+# =============================================================================
+# Update path variable between reads
+# =============================================================================
+
+statement ok
+SET VARIABLE mutable_path = '__pathvar_test_data.csv';
+
+query I
+SELECT count(*) FROM read_csv('pathvariable:mutable_path');
+----
+2
+
+statement ok
+SET VARIABLE mutable_path = '__pathvar_test_data.txt';
+
+query I
+SELECT rtrim(content, chr(10)) FROM read_text('pathvariable:mutable_path');
+----
+Hello, World!

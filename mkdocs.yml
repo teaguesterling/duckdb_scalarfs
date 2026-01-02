@@ -53,6 +53,7 @@ nav:
   - Protocols:
     - Overview: protocols/overview.md
     - variable: protocols/variable.md
+    - pathvariable: protocols/pathvariable.md
     - data: protocols/data-uri.md
     - data+varchar: protocols/data-varchar.md
     - data+blob: protocols/data-blob.md

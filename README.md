@@ -12,6 +12,7 @@ DuckDB's file functions (`read_csv`, `read_json`, `COPY TO`, etc.) expect file p
 | Protocol | Purpose | Mode |
 |----------|---------|------|
 | `variable:` | DuckDB variable as file | Read/Write |
+| `pathvariable:` | File path stored in variable | Read/Write |
 | `data:` | RFC 2397 data URI (base64/url-encoded) | Read |
 | `data+varchar:` | Raw VARCHAR content as file | Read |
 | `data+blob:` | Escaped BLOB content as file | Read |
@@ -127,6 +128,77 @@ SET VARIABLE data_02 = 'a,b\n3,4';
 SET VARIABLE data_100 = 'a,b\n5,6';
 
 SELECT * FROM read_csv('variable:data_??');  -- Matches data_01, data_02 (not data_100)
+```
+
+### `pathvariable:` — Path Stored in Variable
+
+Treat a variable's content as a file path, then read/write through the underlying filesystem.
+
+**Key difference from `variable:`:**
+- `variable:X` — Variable content **IS** the file content
+- `pathvariable:X` — Variable content **IS A PATH** to a file
+
+#### Reading via Path Variable
+
+```sql
+-- Store a file path in a variable
+SET VARIABLE data_path = '/data/reports/monthly.csv';
+
+-- Read the file using the path from the variable
+SELECT * FROM read_csv('pathvariable:data_path');
+-- Equivalent to: SELECT * FROM read_csv('/data/reports/monthly.csv');
+
+-- Works with any protocol the underlying filesystem supports
+SET VARIABLE s3_path = 's3://my-bucket/data.parquet';
+SELECT * FROM read_parquet('pathvariable:s3_path');
+```
+
+#### Writing via Path Variable
+
+```sql
+-- Store the output path in a variable
+SET VARIABLE output_path = '/data/exports/results.csv';
+
+-- Write query results to the path
+COPY my_table TO 'pathvariable:output_path' (FORMAT csv);
+-- Writes to /data/exports/results.csv
+```
+
+#### Two-Level Glob Support
+
+`pathvariable:` supports globs at two levels:
+
+1. **Glob on variable names** — Match multiple path variables
+2. **Glob within paths** — Paths in variables can contain glob patterns
+
+```sql
+-- Level 1: Multiple variables with paths
+SET VARIABLE input_jan = '/data/2024/jan/*.csv';
+SET VARIABLE input_feb = '/data/2024/feb/*.csv';
+SET VARIABLE input_mar = '/data/2024/mar/*.csv';
+
+-- Glob matches variable names, then expands globs in each path
+SELECT * FROM read_csv('pathvariable:input_*');
+-- Reads all CSV files from jan/, feb/, and mar/ directories
+
+-- Level 2: Single variable with glob path
+SET VARIABLE all_logs = '/var/log/app/*.log';
+SELECT * FROM read_text('pathvariable:all_logs');
+-- Expands /var/log/app/*.log and reads all matching files
+```
+
+#### Dynamic Path Selection
+
+Useful for switching between environments or data sources:
+
+```sql
+-- Set path based on environment
+SET VARIABLE config_path = CASE
+  WHEN current_setting('env') = 'prod' THEN '/etc/app/prod.json'
+  ELSE './config/dev.json'
+END;
+
+SELECT * FROM read_json('pathvariable:config_path');
 ```
 
 ### `data+varchar:` — Raw Inline Content
@@ -341,8 +413,9 @@ make test
 
 - **Content size**: Limited by DuckDB's VARCHAR/BLOB size limits and available memory
 - **No streaming**: Entire content is buffered before reading
-- **Write support**: Only `variable:` protocol supports writing
+- **Write support**: Only `variable:` and `pathvariable:` protocols support writing
 - **No null bytes in VARCHAR**: Use `data+blob:` or `data:;base64,` for binary content
+- **pathvariable: type restriction**: Variable must be VARCHAR or BLOB type (not INT, LIST, etc.)
 
 ## License
 

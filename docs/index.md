@@ -14,6 +14,7 @@ DuckDB's file functions (`read_csv`, `read_json`, `COPY TO`, etc.) expect file p
 | Protocol | Purpose | Mode |
 |----------|---------|------|
 | `variable:` | DuckDB variable as file | Read/Write |
+| `pathvariable:` | File path stored in variable | Read/Write |
 | `data:` | RFC 2397 data URI (base64/url-encoded) | Read |
 | `data+varchar:` | Raw VARCHAR content as file | Read |
 | `data+blob:` | Escaped BLOB content as file | Read |
@@ -74,7 +75,8 @@ Ready to use scalarfs? Check out the [Installation Guide](getting-started/instal
 ## Features
 
 - **Variable Protocol** — Read and write DuckDB variables as files with `variable:name`
-- **Glob Support** — Match multiple variables with patterns like `variable:config_*`
+- **Path Variable Protocol** — Use file paths stored in variables with `pathvariable:name`
+- **Two-Level Globs** — Match variable names AND expand path patterns within them
 - **Data URIs** — Use RFC 2397 data URIs with `data:;base64,...`
 - **Zero-Overhead Inline** — Embed content directly with `data+varchar:content`
 - **Binary Support** — Handle binary content with `data+blob:...` escape sequences

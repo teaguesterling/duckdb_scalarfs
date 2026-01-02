@@ -3,6 +3,7 @@
 #include "scalarfs_extension.hpp"
 #include "data_uri_filesystem.hpp"
 #include "variable_filesystem.hpp"
+#include "pathvariable_filesystem.hpp"
 #include "scalarfs_functions.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
@@ -21,6 +22,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Register the variable filesystem (handles variable:)
 	fs.RegisterSubSystem(make_uniq<VariableFileSystem>());
+
+	// Register the path variable filesystem (handles pathvariable:)
+	fs.RegisterSubSystem(make_uniq<PathVariableFileSystem>());
 
 	// Register scalar functions for encoding/decoding URIs
 	ScalarfsFunctions::Register(loader);
