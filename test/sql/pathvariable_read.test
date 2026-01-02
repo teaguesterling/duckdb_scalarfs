@@ -92,7 +92,7 @@ SET VARIABLE bad_path = '/nonexistent/path/to/file.txt';
 statement error
 SELECT * FROM read_text('pathvariable:bad_path');
 ----
-No such file or directory
+Cannot open file
 
 # =============================================================================
 # Type validation: non-VARCHAR/BLOB types should fail
