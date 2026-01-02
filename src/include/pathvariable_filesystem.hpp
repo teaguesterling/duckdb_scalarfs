@@ -35,8 +35,7 @@ namespace duckdb {
 class PathVariableFileSystem : public FileSystem {
 public:
 	// FileSystem interface
-	unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags,
-	                                optional_ptr<FileOpener> opener) override;
+	unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) override;
 
 	bool CanHandleFile(const string &fpath) override;
 	string GetName() const override;
