@@ -20,6 +20,7 @@ DuckDB's file functions (`read_csv`, `read_json`, `COPY TO`, etc.) expect file p
 ## Quick Start
 
 ```sql
+INSTALL scalarfs FROM community;
 LOAD scalarfs;
 
 -- Read JSON from a variable
@@ -37,6 +38,12 @@ SELECT getvariable('exported');
 ```
 
 ## Installation
+
+### From Community
+```sql
+INSTALL scalarfs FROM community;
+LOAD scalarfs;
+```
 
 ### From Source
 
