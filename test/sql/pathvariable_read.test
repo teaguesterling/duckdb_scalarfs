@@ -55,6 +55,57 @@ SELECT rtrim(content, chr(10)) FROM read_text('pathvariable:text_path');
 Hello, World!
 
 # =============================================================================
+# List variable support (VARCHAR[])
+# =============================================================================
+
+# Create additional test files for list testing
+statement ok
+COPY (SELECT 'src,value' || chr(10) || 'list1,100' AS content)
+TO '__pathvar_list_file1.csv' (FORMAT csv, HEADER false, QUOTE '');
+
+statement ok
+COPY (SELECT 'src,value' || chr(10) || 'list2,200' AS content)
+TO '__pathvar_list_file2.csv' (FORMAT csv, HEADER false, QUOTE '');
+
+# Read multiple files via list variable
+statement ok
+SET VARIABLE file_list = ['__pathvar_list_file1.csv', '__pathvar_list_file2.csv'];
+
+query II
+SELECT * FROM read_csv('pathvariable:file_list', header=true) ORDER BY src;
+----
+list1	100
+list2	200
+
+# Empty list should return no rows (or error - depends on DuckDB behavior)
+statement ok
+SET VARIABLE empty_list = []::VARCHAR[];
+
+statement error
+SELECT * FROM read_csv('pathvariable:empty_list');
+----
+No files found
+
+# Single-element list should work like scalar
+statement ok
+SET VARIABLE single_list = ['__pathvar_test_data.csv'];
+
+query I
+SELECT count(*) FROM read_csv('pathvariable:single_list');
+----
+2
+
+# List with glob patterns inside paths
+statement ok
+SET VARIABLE glob_list = ['__pathvar_list_*.csv'];
+
+query II
+SELECT * FROM read_csv('pathvariable:glob_list', header=true) ORDER BY src;
+----
+list1	100
+list2	200
+
+# =============================================================================
 # Variable names with underscores and numbers
 # =============================================================================
 
@@ -107,12 +158,12 @@ SELECT * FROM read_text('pathvariable:int_path');
 must be VARCHAR or BLOB
 
 statement ok
-SET VARIABLE list_path = [1, 2, 3];
+SET VARIABLE int_list_path = [1, 2, 3];
 
 statement error
-SELECT * FROM read_text('pathvariable:list_path');
+SELECT * FROM read_text('pathvariable:int_list_path');
 ----
-must be VARCHAR or BLOB
+child type must be VARCHAR or BLOB
 
 # =============================================================================
 # Path variable pointing to other protocols

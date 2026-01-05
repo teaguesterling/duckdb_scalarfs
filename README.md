@@ -171,12 +171,31 @@ COPY my_table TO 'pathvariable:output_path' (FORMAT csv);
 -- Writes to /data/exports/results.csv
 ```
 
-#### Two-Level Glob Support
+#### List Variable Support
 
-`pathvariable:` supports globs at two levels:
+Store multiple paths in a list variable to read them all at once:
+
+```sql
+-- Store multiple paths in a list
+SET VARIABLE data_files = ['/data/jan.csv', '/data/feb.csv', '/data/mar.csv'];
+
+-- Read all files from the list
+SELECT * FROM read_csv('pathvariable:data_files');
+-- Reads all three CSV files
+
+-- Lists can contain glob patterns too
+SET VARIABLE patterns = ['/data/2024/*.csv', '/archive/2023/*.csv'];
+SELECT * FROM read_csv('pathvariable:patterns');
+-- Expands both globs and reads all matching files
+```
+
+#### Multi-Level Glob Support
+
+`pathvariable:` supports globs at multiple levels:
 
 1. **Glob on variable names** — Match multiple path variables
-2. **Glob within paths** — Paths in variables can contain glob patterns
+2. **List expansion** — Variables containing `VARCHAR[]` expand to multiple paths
+3. **Glob within paths** — Paths in variables can contain glob patterns
 
 ```sql
 -- Level 1: Multiple variables with paths
@@ -422,7 +441,7 @@ make test
 - **No streaming**: Entire content is buffered before reading
 - **Write support**: Only `variable:` and `pathvariable:` protocols support writing
 - **No null bytes in VARCHAR**: Use `data+blob:` or `data:;base64,` for binary content
-- **pathvariable: type restriction**: Variable must be VARCHAR or BLOB type (not INT, LIST, etc.)
+- **pathvariable: type restriction**: Variable must be VARCHAR, BLOB, or a list of those types (VARCHAR[], BLOB[]). List variables are only supported for reading, not writing.
 
 ## License
 

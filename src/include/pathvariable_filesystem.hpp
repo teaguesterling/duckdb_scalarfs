@@ -72,7 +72,17 @@ private:
 	string ResolvePath(const string &path, optional_ptr<FileOpener> opener);
 
 	// Get the target path from a variable (without temp prefix computation)
+	// For scalar types (VARCHAR/BLOB), returns a single path
+	// Throws for list types - use GetPathsFromVariable instead
 	string GetPathFromVariable(const string &var_name, optional_ptr<FileOpener> opener);
+
+	// Get paths from a variable - handles both scalar and list types
+	// For VARCHAR/BLOB: returns single-element vector
+	// For VARCHAR[]/BLOB[]: returns vector with all list elements
+	vector<string> GetPathsFromVariable(const string &var_name, optional_ptr<FileOpener> opener);
+
+	// Check if a variable contains a list type
+	bool IsListVariable(const string &var_name, optional_ptr<FileOpener> opener);
 
 	// Compute temp path for a given target path (prepend tmp_ to filename)
 	static string ComputeTempPath(const string &target_path);

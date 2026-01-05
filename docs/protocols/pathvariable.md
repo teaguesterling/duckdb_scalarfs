@@ -90,9 +90,51 @@ COPY my_table TO 'pathvariable:out' (FORMAT csv);
 COPY my_table TO 'pathvariable:out' (FORMAT csv, USE_TMP_FILE false);
 ```
 
-## Two-Level Glob Support
+## List Variable Support
 
-`pathvariable:` supports glob patterns at two levels:
+Store multiple paths in a `VARCHAR[]` list variable to read them all at once:
+
+```sql
+-- Store multiple paths in a list
+SET VARIABLE data_files = ['/data/jan.csv', '/data/feb.csv', '/data/mar.csv'];
+
+-- Read all files from the list
+SELECT * FROM read_csv('pathvariable:data_files');
+-- Reads all three CSV files
+```
+
+### Lists with Glob Patterns
+
+List elements can contain glob patterns, which are expanded:
+
+```sql
+-- Each list element is a glob pattern
+SET VARIABLE patterns = ['/data/2024/*.csv', '/archive/2023/*.csv'];
+
+-- Expands both patterns and reads all matching files
+SELECT * FROM read_csv('pathvariable:patterns');
+```
+
+### Storing Paths from Queries
+
+Use `variable:` to store query results as a path list, then read with `pathvariable:`:
+
+```sql
+-- Store paths from a query into a variable
+COPY (SELECT file_path FROM my_file_index WHERE category = 'reports')
+TO 'variable:report_paths' (FORMAT csv, HEADER false);
+
+-- The variable now contains paths, one per line
+-- Read all those files
+SELECT * FROM read_csv('pathvariable:report_paths');
+```
+
+!!! note "List writes not supported"
+    List variables (`VARCHAR[]`) are only supported for reading. For writes, use a scalar VARCHAR variable.
+
+## Multi-Level Glob Support
+
+`pathvariable:` supports glob patterns at multiple levels:
 
 ### Level 1: Glob on Variable Names
 
@@ -108,7 +150,18 @@ SET VARIABLE input_mar = '/data/2024/mar/sales.csv';
 SELECT * FROM read_csv('pathvariable:input_*');
 ```
 
-### Level 2: Glob in the Path
+### Level 2: List Expansion
+
+Variables containing `VARCHAR[]` lists expand to multiple paths:
+
+```sql
+SET VARIABLE all_inputs = ['/data/sales.csv', '/data/returns.csv'];
+
+-- List expands to both paths
+SELECT * FROM read_csv('pathvariable:all_inputs');
+```
+
+### Level 3: Glob in the Path
 
 Paths stored in variables can contain glob patterns:
 
@@ -119,9 +172,9 @@ SET VARIABLE all_csvs = '/data/2024/*.csv';
 SELECT * FROM read_csv('pathvariable:all_csvs');
 ```
 
-### Both Levels Combined
+### All Levels Combined
 
-The most powerful use case—glob on variable names AND glob in paths:
+The most powerful use case—glob on variable names, list expansion, AND glob in paths:
 
 ```sql
 -- Each variable contains a glob path
@@ -130,7 +183,7 @@ SET VARIABLE logs_app2 = '/var/log/app2/*.log';
 SET VARIABLE logs_app3 = '/var/log/app3/*.log';
 
 -- Level 1: matches logs_app1, logs_app2, logs_app3
--- Level 2: expands each /var/log/appN/*.log pattern
+-- Level 3: expands each /var/log/appN/*.log pattern
 SELECT * FROM read_text('pathvariable:logs_*');
 -- Reads ALL log files from ALL three app directories
 ```
@@ -178,12 +231,28 @@ SELECT * FROM read_text('pathvariable:nullable');
 
 ### Wrong Variable Type
 
-The variable must be VARCHAR or BLOB type:
+The variable must be VARCHAR, BLOB, or a list of those types:
 
 ```sql
 SET VARIABLE int_path = 42;
 SELECT * FROM read_text('pathvariable:int_path');
 -- Error: Variable 'int_path' must be VARCHAR or BLOB type to be used as a path, got INTEGER
+
+-- Integer lists also fail
+SET VARIABLE int_list = [1, 2, 3];
+SELECT * FROM read_text('pathvariable:int_list');
+-- Error: Variable 'int_list' is a list but child type must be VARCHAR or BLOB, got INTEGER[]
+```
+
+### List Variable for Writes
+
+List variables cannot be used for write operations:
+
+```sql
+SET VARIABLE paths = ['/data/out1.csv', '/data/out2.csv'];
+COPY my_table TO 'pathvariable:paths' (FORMAT csv);
+-- Error: Variable 'paths' is a list type (VARCHAR[]). List variables are supported for reading,
+--        but not for single-file write operations.
 ```
 
 ### File Not Found

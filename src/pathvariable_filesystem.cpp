@@ -2,6 +2,8 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/file_opener.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/common/types.hpp"
+#include "duckdb/common/types/value.hpp"
 #include "duckdb/function/scalar/string_common.hpp"
 #include "duckdb/main/client_config.hpp"
 
@@ -79,14 +81,92 @@ string PathVariableFileSystem::GetPathFromVariable(const string &var_name, optio
 		throw IOException("Variable '%s' is NULL", var_name);
 	}
 
-	// Type validation: must be VARCHAR or BLOB
+	// Type validation: must be VARCHAR or BLOB (or list of those for read operations)
 	auto &type = result.type();
+	if (type.id() == LogicalTypeId::LIST) {
+		// Check if it's a valid list type (VARCHAR[] or BLOB[])
+		auto &child_type = ListType::GetChildType(type);
+		if (child_type.id() == LogicalTypeId::VARCHAR || child_type.id() == LogicalTypeId::BLOB) {
+			// Valid list type - supported for reading via Glob, but not for single-file operations
+			throw IOException("Variable '%s' is a list type (%s). List variables are supported for reading "
+			                  "(e.g., read_csv, read_json), but not for single-file write operations. "
+			                  "Use a scalar VARCHAR or BLOB variable for writes.",
+			                  var_name, type.ToString());
+		} else {
+			// Invalid list child type
+			throw IOException("Variable '%s' is a list but child type must be VARCHAR or BLOB, got %s",
+			                  var_name, type.ToString());
+		}
+	}
 	if (type.id() != LogicalTypeId::VARCHAR && type.id() != LogicalTypeId::BLOB) {
 		throw IOException("Variable '%s' must be VARCHAR or BLOB type to be used as a path, got %s", var_name,
 		                  type.ToString());
 	}
 
 	return result.ToString();
+}
+
+bool PathVariableFileSystem::IsListVariable(const string &var_name, optional_ptr<FileOpener> opener) {
+	auto context = FileOpener::TryGetClientContext(opener);
+	if (!context) {
+		return false;
+	}
+
+	auto &config = ClientConfig::GetConfig(*context);
+	Value result;
+	if (!config.GetUserVariable(var_name, result)) {
+		return false;
+	}
+	if (result.IsNull()) {
+		return false;
+	}
+
+	return result.type().id() == LogicalTypeId::LIST;
+}
+
+vector<string> PathVariableFileSystem::GetPathsFromVariable(const string &var_name, optional_ptr<FileOpener> opener) {
+	auto context = FileOpener::TryGetClientContext(opener);
+	if (!context) {
+		throw IOException("Cannot access variables without client context");
+	}
+
+	auto &config = ClientConfig::GetConfig(*context);
+	Value result;
+	if (!config.GetUserVariable(var_name, result)) {
+		throw IOException("Variable '%s' not found", var_name);
+	}
+	if (result.IsNull()) {
+		throw IOException("Variable '%s' is NULL", var_name);
+	}
+
+	auto &type = result.type();
+
+	// Handle list types (VARCHAR[] or BLOB[])
+	if (type.id() == LogicalTypeId::LIST) {
+		auto &child_type = ListType::GetChildType(type);
+		if (child_type.id() != LogicalTypeId::VARCHAR && child_type.id() != LogicalTypeId::BLOB) {
+			throw IOException("Variable '%s' is a list but child type must be VARCHAR or BLOB, got %s[]", var_name,
+			                  child_type.ToString());
+		}
+
+		vector<string> paths;
+		auto &children = ListValue::GetChildren(result);
+		for (const auto &child : children) {
+			if (child.IsNull()) {
+				throw IOException("Variable '%s' contains NULL element in list", var_name);
+			}
+			paths.push_back(child.ToString());
+		}
+		return paths;
+	}
+
+	// Handle scalar types (VARCHAR or BLOB)
+	if (type.id() != LogicalTypeId::VARCHAR && type.id() != LogicalTypeId::BLOB) {
+		throw IOException("Variable '%s' must be VARCHAR, BLOB, or a list of these types, got %s", var_name,
+		                  type.ToString());
+	}
+
+	return {result.ToString()};
 }
 
 string PathVariableFileSystem::ResolvePath(const string &path, optional_ptr<FileOpener> opener) {
@@ -126,8 +206,9 @@ unique_ptr<FileHandle> PathVariableFileSystem::OpenFile(const string &path, File
 
 vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener *opener) {
 	// =============================================================================
-	// Two-level glob implementation:
+	// Multi-level glob implementation:
 	// Level 1: Glob on variable names (pathvariable:data_* matches data_01, data_02)
+	// Level 1b: List expansion (if variable is VARCHAR[], expand to multiple paths)
 	// Level 2: Glob within paths (if data_01 = '/data/*.csv', expands that too)
 	// =============================================================================
 
@@ -149,6 +230,39 @@ vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener
 
 	vector<string> resolved_paths;
 
+	// Helper lambda to extract paths from a Value (handles scalar and list types)
+	auto extract_paths_from_value = [](const Value &var_value, vector<string> &out_paths) -> bool {
+		if (var_value.IsNull()) {
+			return false;
+		}
+
+		auto &type = var_value.type();
+
+		// Handle list types (VARCHAR[] or BLOB[])
+		if (type.id() == LogicalTypeId::LIST) {
+			auto &child_type = ListType::GetChildType(type);
+			if (child_type.id() != LogicalTypeId::VARCHAR && child_type.id() != LogicalTypeId::BLOB) {
+				return false; // Wrong child type
+			}
+
+			auto &children = ListValue::GetChildren(var_value);
+			for (const auto &child : children) {
+				if (!child.IsNull()) {
+					out_paths.push_back(child.ToString());
+				}
+			}
+			return true;
+		}
+
+		// Handle scalar types
+		if (type.id() != LogicalTypeId::VARCHAR && type.id() != LogicalTypeId::BLOB) {
+			return false; // Wrong type
+		}
+
+		out_paths.push_back(var_value.ToString());
+		return true;
+	};
+
 	// Check if the pattern contains glob characters
 	if (!FileSystem::HasGlob(pattern)) {
 		// No glob in variable name - resolve this single variable
@@ -164,32 +278,21 @@ vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener
 			return {OpenFileInfo(path)};
 		}
 
-		// Type check
-		auto &type = result.type();
-		if (type.id() != LogicalTypeId::VARCHAR && type.id() != LogicalTypeId::BLOB) {
+		// Extract paths (handles both scalar and list types)
+		if (!extract_paths_from_value(result, resolved_paths)) {
 			// Wrong type - return the original path, let OpenFile throw the error
 			return {OpenFileInfo(path)};
 		}
-
-		resolved_paths.push_back(result.ToString());
 	} else {
 		// Level 1: Glob on variable names
 		for (const auto &entry : config.user_variables) {
 			const string &var_name = entry.first;
 			const Value &var_value = entry.second;
 
-			// Skip NULL or wrong type variables
-			if (var_value.IsNull()) {
-				continue;
-			}
-			auto &type = var_value.type();
-			if (type.id() != LogicalTypeId::VARCHAR && type.id() != LogicalTypeId::BLOB) {
-				continue;
-			}
-
 			// Match variable name against pattern
 			if (duckdb::Glob(var_name.c_str(), var_name.size(), pattern.c_str(), pattern.size())) {
-				resolved_paths.push_back(var_value.ToString());
+				// Extract paths from matching variable (handles scalar and list types)
+				extract_paths_from_value(var_value, resolved_paths);
 			}
 		}
 	}
