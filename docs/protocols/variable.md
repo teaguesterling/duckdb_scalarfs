@@ -103,6 +103,56 @@ You can write in any format DuckDB's COPY supports:
 | CSV with header | `FORMAT csv, HEADER true` | `COPY t TO 'variable:x' (FORMAT csv, HEADER true)` |
 | JSON | `FORMAT json` | `COPY t TO 'variable:x' (FORMAT json)` |
 | Parquet | `FORMAT parquet` | `COPY t TO 'variable:x' (FORMAT parquet)` |
+| **Native Value** | `FORMAT variable` | `COPY t TO 'variable:x' (FORMAT variable)` |
+
+### FORMAT variable — Store Native Values
+
+Unlike other formats that serialize to text, `FORMAT variable` stores the query result as a native DuckDB value. This is particularly useful for storing lists to use with `pathvariable:`.
+
+```sql
+-- Store paths from a query as a VARCHAR[]
+COPY (SELECT path FROM file_index WHERE active) TO 'variable:paths' (FORMAT variable);
+
+-- paths is now a native VARCHAR[], not serialized text
+SELECT typeof(getvariable('paths'));  -- VARCHAR[]
+
+-- Use with pathvariable:
+SELECT * FROM read_csv('pathvariable:paths');
+```
+
+#### LIST Modes
+
+The `LIST` option controls how query results are converted to values:
+
+| Mode | Rows | Cols | Result |
+|------|------|------|--------|
+| `auto` (default) | 1 | 1 | Scalar value |
+| `auto` | N | 1 | List of values |
+| `auto` | 1 | N | Struct |
+| `auto` | N | N | List of structs |
+| `rows` | any | any | Always list of structs |
+| `none` | 1 only | any | Scalar or struct (error if >1 row) |
+| `scalar` | any | 1 only | Scalar or list (error if >1 column) |
+
+```sql
+-- auto mode examples
+COPY (SELECT 42) TO 'variable:x' (FORMAT variable);
+-- x = 42 (scalar)
+
+COPY (SELECT unnest([1,2,3])) TO 'variable:x' (FORMAT variable);
+-- x = [1, 2, 3] (list)
+
+COPY (SELECT 1 AS a, 2 AS b) TO 'variable:x' (FORMAT variable);
+-- x = {'a': 1, 'b': 2} (struct)
+
+-- Force list of structs
+COPY (SELECT 1 AS id) TO 'variable:x' (FORMAT variable, LIST rows);
+-- x = [{'id': 1}]
+
+-- Explicit single-column mode
+COPY (SELECT path FROM files) TO 'variable:x' (FORMAT variable, LIST scalar);
+-- Error if query has multiple columns
+```
 
 ## Glob Pattern Matching
 

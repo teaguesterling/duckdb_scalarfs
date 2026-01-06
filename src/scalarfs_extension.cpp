@@ -4,6 +4,7 @@
 #include "data_uri_filesystem.hpp"
 #include "variable_filesystem.hpp"
 #include "pathvariable_filesystem.hpp"
+#include "variable_copy_function.hpp"
 #include "scalarfs_functions.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
@@ -25,6 +26,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Register the path variable filesystem (handles pathvariable:)
 	fs.RegisterSubSystem(make_uniq<PathVariableFileSystem>());
+
+	// Register the variable copy function (FORMAT variable)
+	VariableCopyFunction::Register(loader);
 
 	// Register scalar functions for encoding/decoding URIs
 	ScalarfsFunctions::Register(loader);

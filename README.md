@@ -108,6 +108,42 @@ SELECT getvariable('big_sales');
 -- [{"product":"Gadget","amount":200}]
 ```
 
+#### Writing Native Values with FORMAT variable
+
+Store query results as native DuckDB values (not serialized text):
+
+```sql
+-- Store a list of paths for use with pathvariable:
+COPY (SELECT path FROM file_index WHERE active) TO 'variable:paths' (FORMAT variable);
+-- paths is now a VARCHAR[], not serialized text
+
+-- Use with pathvariable: to read all files
+SELECT * FROM read_csv('pathvariable:paths');
+
+-- Store a struct
+COPY (SELECT 1 AS id, 'Alice' AS name) TO 'variable:person' (FORMAT variable);
+SELECT getvariable('person').name;  -- Alice
+```
+
+**LIST modes** control how results are converted:
+
+| Mode | Behavior |
+|------|----------|
+| `auto` (default) | Smart: 1×1→scalar, N×1→list, 1×N→struct, N×N→list of structs |
+| `rows` | Always list of structs, even for single row |
+| `none` | Single value only (error if >1 row) |
+| `scalar` | Single column only (error if >1 column) |
+
+```sql
+-- Force list of structs even for one row
+COPY (SELECT 1 AS id) TO 'variable:x' (FORMAT variable, LIST rows);
+-- x = [{'id': 1}]
+
+-- Explicit single column mode
+COPY (SELECT path FROM files) TO 'variable:paths' (FORMAT variable, LIST scalar);
+-- Error if query has multiple columns
+```
+
 #### Glob Pattern Matching
 
 Match multiple variables with glob patterns:

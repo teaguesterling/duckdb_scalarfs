@@ -1,0 +1,201 @@
+# name: test/sql/variable_format.test
+# description: Test FORMAT variable for COPY TO
+# group: [sql]
+
+require scalarfs
+
+# =============================================================================
+# LIST auto mode (default) - smart detection
+# =============================================================================
+
+# Single row, single column -> scalar
+statement ok
+COPY (SELECT 42 AS value) TO 'variable:scalar_val' (FORMAT variable);
+
+query I
+SELECT getvariable('scalar_val');
+----
+42
+
+query I
+SELECT typeof(getvariable('scalar_val'));
+----
+INTEGER
+
+# Multiple rows, single column -> list of values
+statement ok
+COPY (SELECT unnest(['a', 'b', 'c']) AS item) TO 'variable:list_val' (FORMAT variable);
+
+query I
+SELECT getvariable('list_val');
+----
+[a, b, c]
+
+query I
+SELECT typeof(getvariable('list_val'));
+----
+VARCHAR[]
+
+# Single row, multiple columns -> struct
+statement ok
+COPY (SELECT 1 AS id, 'Alice' AS name, 30 AS age) TO 'variable:struct_val' (FORMAT variable);
+
+query I
+SELECT getvariable('struct_val').id;
+----
+1
+
+query I
+SELECT getvariable('struct_val').name;
+----
+Alice
+
+# Multiple rows, multiple columns -> list of structs
+statement ok
+COPY (SELECT * FROM (VALUES (1, 'Alice'), (2, 'Bob')) AS t(id, name)) TO 'variable:list_struct' (FORMAT variable);
+
+query I
+SELECT len(getvariable('list_struct'));
+----
+2
+
+query I
+SELECT getvariable('list_struct')[1].name;
+----
+Alice
+
+query I
+SELECT getvariable('list_struct')[2].name;
+----
+Bob
+
+# =============================================================================
+# LIST rows mode - always produce list of structs
+# =============================================================================
+
+# Even single row produces list
+statement ok
+COPY (SELECT 1 AS id, 'Solo' AS name) TO 'variable:rows_single' (FORMAT variable, LIST rows);
+
+query I
+SELECT len(getvariable('rows_single'));
+----
+1
+
+query I
+SELECT getvariable('rows_single')[1].name;
+----
+Solo
+
+# =============================================================================
+# LIST none mode - single value only
+# =============================================================================
+
+# Single value works
+statement ok
+COPY (SELECT 'hello' AS msg) TO 'variable:none_single' (FORMAT variable, LIST none);
+
+query I
+SELECT getvariable('none_single');
+----
+hello
+
+# Multiple rows should error
+statement error
+COPY (SELECT unnest([1, 2, 3])) TO 'variable:none_fail' (FORMAT variable, LIST none);
+----
+LIST none mode requires single row result
+
+# =============================================================================
+# LIST scalar mode - single column only
+# =============================================================================
+
+# Single column, multiple rows -> list
+statement ok
+COPY (SELECT unnest([10, 20, 30]) AS num) TO 'variable:scalar_list' (FORMAT variable, LIST scalar);
+
+query I
+SELECT getvariable('scalar_list');
+----
+[10, 20, 30]
+
+# Single column, single row -> scalar
+statement ok
+COPY (SELECT 99 AS num) TO 'variable:scalar_one' (FORMAT variable, LIST scalar);
+
+query I
+SELECT getvariable('scalar_one');
+----
+99
+
+# Multiple columns should error
+statement error
+COPY (SELECT 1 AS a, 2 AS b) TO 'variable:scalar_fail' (FORMAT variable, LIST scalar);
+----
+LIST scalar mode requires single-column result
+
+# =============================================================================
+# Empty results
+# =============================================================================
+
+statement ok
+COPY (SELECT * FROM (SELECT 1 WHERE false) AS t(x)) TO 'variable:empty_val' (FORMAT variable);
+
+query I
+SELECT getvariable('empty_val');
+----
+[]
+
+# =============================================================================
+# Integration with pathvariable:
+# =============================================================================
+
+# Create test files
+statement ok
+COPY (SELECT 'x,y' || chr(10) || '1,2') TO '__pathvar_format_test1.csv' (FORMAT csv, HEADER false, QUOTE '');
+
+statement ok
+COPY (SELECT 'x,y' || chr(10) || '3,4') TO '__pathvar_format_test2.csv' (FORMAT csv, HEADER false, QUOTE '');
+
+# Store paths from query
+statement ok
+CREATE TABLE test_files(path VARCHAR);
+
+statement ok
+INSERT INTO test_files VALUES ('__pathvar_format_test1.csv'), ('__pathvar_format_test2.csv');
+
+statement ok
+COPY (SELECT path FROM test_files) TO 'variable:file_paths' (FORMAT variable);
+
+# Verify it's a VARCHAR[]
+query I
+SELECT typeof(getvariable('file_paths'));
+----
+VARCHAR[]
+
+# Use with pathvariable: to read all files
+query II
+SELECT * FROM read_csv('pathvariable:file_paths', header=false) ORDER BY column0, column1;
+----
+1	2
+3	4
+x	y
+x	y
+
+# =============================================================================
+# Invalid options
+# =============================================================================
+
+statement error
+COPY (SELECT 1) TO 'variable:bad' (FORMAT variable, LIST invalid);
+----
+Invalid LIST mode
+
+# =============================================================================
+# Path validation
+# =============================================================================
+
+statement error
+COPY (SELECT 1) TO 'notavariable:foo' (FORMAT variable);
+----
+FORMAT variable requires 'variable:' path prefix
