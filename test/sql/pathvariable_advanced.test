@@ -1,0 +1,176 @@
+# name: test/sql/pathvariable_advanced.test
+# description: Advanced pathvariable: tests - glob expansion, mixed paths, FORMAT variable integration
+# group: [sql]
+
+require scalarfs
+
+# =============================================================================
+# Setup: Create test files
+# =============================================================================
+
+statement ok
+COPY (SELECT 'src,value' || chr(10) || 'adv1,100')
+TO '__pathvar_adv1.csv' (FORMAT csv, HEADER false, QUOTE '');
+
+statement ok
+COPY (SELECT 'src,value' || chr(10) || 'adv2,200')
+TO '__pathvar_adv2.csv' (FORMAT csv, HEADER false, QUOTE '');
+
+statement ok
+COPY (SELECT 'src,value' || chr(10) || 'adv3,300')
+TO '__pathvar_adv3.csv' (FORMAT csv, HEADER false, QUOTE '');
+
+# =============================================================================
+# glob() as path expansion preview
+# =============================================================================
+
+# glob() can be used to preview what paths pathvariable: will resolve to
+statement ok
+SET VARIABLE preview_paths = ['__pathvar_adv1.csv', '__pathvar_adv2.csv'];
+
+query I
+SELECT file FROM glob('pathvariable:preview_paths') ORDER BY file;
+----
+__pathvar_adv1.csv
+__pathvar_adv2.csv
+
+# glob() expands glob patterns inside the list
+statement ok
+SET VARIABLE glob_preview = ['__pathvar_adv*.csv'];
+
+query I
+SELECT file FROM glob('pathvariable:glob_preview') ORDER BY file;
+----
+__pathvar_adv1.csv
+__pathvar_adv2.csv
+__pathvar_adv3.csv
+
+# glob() with multiple glob patterns in list
+statement ok
+SET VARIABLE multi_glob = ['__pathvar_adv1.csv', '__pathvar_adv?.csv'];
+
+query I
+SELECT count(DISTINCT file) FROM glob('pathvariable:multi_glob');
+----
+3
+
+# glob() on empty list returns 0 rows (not an error)
+statement ok
+SET VARIABLE empty_for_glob = []::VARCHAR[];
+
+query I
+SELECT count(*) FROM glob('pathvariable:empty_for_glob');
+----
+0
+
+# =============================================================================
+# Mixed local paths and URLs in list
+# =============================================================================
+
+# List containing both local paths and URLs
+# (URLs won't be readable without httpfs, but glob should handle them)
+statement ok
+SET VARIABLE mixed_local_remote = [
+  '__pathvar_adv1.csv',
+  'https://example.com/data.csv',
+  '__pathvar_adv2.csv',
+  's3://bucket/file.csv'
+];
+
+# glob() should return all paths - local ones resolved, URLs passed through
+query I
+SELECT file FROM glob('pathvariable:mixed_local_remote') ORDER BY file;
+----
+__pathvar_adv1.csv
+__pathvar_adv2.csv
+https://example.com/data.csv
+s3://bucket/file.csv
+
+# =============================================================================
+# FORMAT variable -> pathvariable: integration
+# =============================================================================
+
+# Create a table of file paths
+statement ok
+CREATE OR REPLACE TABLE file_registry(path VARCHAR, active BOOLEAN);
+
+statement ok
+INSERT INTO file_registry VALUES
+  ('__pathvar_adv1.csv', true),
+  ('__pathvar_adv2.csv', true),
+  ('__pathvar_adv3.csv', false);
+
+# Store active paths using FORMAT variable
+statement ok
+COPY (SELECT path FROM file_registry WHERE active ORDER BY path)
+TO 'variable:active_paths' (FORMAT variable);
+
+# Verify it's a proper list
+query I
+SELECT typeof(getvariable('active_paths'));
+----
+VARCHAR[]
+
+# Read files through pathvariable: using the stored list
+query II
+SELECT * FROM read_csv('pathvariable:active_paths', header=false) ORDER BY column0;
+----
+adv1	100
+adv2	200
+src	value
+src	value
+
+# Preview the paths before reading
+query I
+SELECT file FROM glob('pathvariable:active_paths') ORDER BY file;
+----
+__pathvar_adv1.csv
+__pathvar_adv2.csv
+
+# =============================================================================
+# FORMAT variable LIST scalar mode for paths
+# =============================================================================
+
+# Use LIST scalar to ensure single-column output for paths
+statement ok
+COPY (SELECT path FROM file_registry WHERE active ORDER BY path)
+TO 'variable:scalar_paths' (FORMAT variable, LIST scalar);
+
+query I
+SELECT typeof(getvariable('scalar_paths'));
+----
+VARCHAR[]
+
+query I
+SELECT file FROM glob('pathvariable:scalar_paths') ORDER BY file;
+----
+__pathvar_adv1.csv
+__pathvar_adv2.csv
+
+# =============================================================================
+# Glob on variable names with list variables
+# =============================================================================
+
+statement ok
+SET VARIABLE input_batch_a = ['__pathvar_adv1.csv'];
+
+statement ok
+SET VARIABLE input_batch_b = ['__pathvar_adv2.csv', '__pathvar_adv3.csv'];
+
+# Glob matches variable names, each containing a list
+query II
+SELECT * FROM read_csv('pathvariable:input_batch_*', header=false) ORDER BY column0;
+----
+adv1	100
+adv2	200
+adv3	300
+src	value
+src	value
+src	value
+
+# =============================================================================
+# Cleanup
+# =============================================================================
+
+statement ok
+DROP TABLE file_registry;
