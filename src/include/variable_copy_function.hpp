@@ -31,10 +31,10 @@ namespace duckdb {
 //
 
 enum class VariableCopyListMode : uint8_t {
-	AUTO = 0,    // Smart detection
-	ROWS = 1,    // Always list of structs
-	NONE = 2,    // Single value only (error if >1 row)
-	SCALAR = 3   // Single column only (error if >1 column)
+	AUTO = 0,  // Smart detection
+	ROWS = 1,  // Always list of structs
+	NONE = 2,  // Single value only (error if >1 row)
+	SCALAR = 3 // Single column only (error if >1 column)
 };
 
 struct VariableCopyBindData : public FunctionData {

@@ -94,8 +94,8 @@ string PathVariableFileSystem::GetPathFromVariable(const string &var_name, optio
 			                  var_name, type.ToString());
 		} else {
 			// Invalid list child type
-			throw IOException("Variable '%s' is a list but child type must be VARCHAR or BLOB, got %s",
-			                  var_name, type.ToString());
+			throw IOException("Variable '%s' is a list but child type must be VARCHAR or BLOB, got %s", var_name,
+			                  type.ToString());
 		}
 	}
 	if (type.id() != LogicalTypeId::VARCHAR && type.id() != LogicalTypeId::BLOB) {
