@@ -5,7 +5,117 @@ The `pathvariable:` protocol allows you to store file paths in DuckDB variables 
 ## Syntax
 
 ```
+pathvariable:[modifier:]...variable_name[!value]
+```
+
+Basic usage (no modifiers):
+```
 pathvariable:variable_name
+```
+
+With modifiers:
+```
+pathvariable:search:no-missing:append:roots!/blobs/data.bin
+```
+
+## Modifiers
+
+Modifiers control how paths are resolved, filtered, and constructed. They can be combined.
+
+| Modifier | Description |
+|----------|-------------|
+| `search` | Return only the first existing file (for multi-root fallback) |
+| `no-missing` | Skip non-existent files instead of erroring |
+| `no-glob` | Disable glob pattern expansion in paths |
+| `no-scalarfs` | Don't modify scalarfs protocol paths with append/prepend |
+| `no-protocols` | Don't modify paths with explicit protocols (://) with append/prepend |
+| `no-cache` | Disable caching of path resolution |
+| `append!/path` | Append literal path to each base path |
+| `append!$var` | Append value of variable to each base path |
+| `prepend!/path` | Prepend literal path to each base path |
+| `prepend!$var` | Prepend value of variable to each base path |
+
+### Multi-Root Search (file_search_path Pattern)
+
+Create a custom search path that checks local cache before remote storage:
+
+```sql
+-- Define search roots: local first, then remote
+SET VARIABLE search_roots = [
+    '/home/user/.cache/myapp/data',
+    's3://company-bucket/shared/data'
+];
+
+-- Search returns FIRST existing match (local cache wins if present)
+SELECT * FROM read_parquet(
+    format('pathvariable:append:search:search_roots!/reports/{}.parquet', report_id)
+);
+```
+
+### Content-Addressed Storage (Blob Resolution)
+
+Resolve blobs by hash across multiple storage tiers:
+
+```sql
+-- Set blob storage roots
+SET VARIABLE blob_roots = [
+    '/local/blobs',           -- Fast local storage
+    's3://archive/blobs'      -- Cold storage fallback
+];
+
+-- Find blob by content hash (checks local first)
+SELECT content FROM read_blob(
+    format('pathvariable:append:search:blob_roots!/{}/{}.bin.gz', hash[:2], hash)
+);
+```
+
+### Ignore Missing Files
+
+Read all files that exist, skip missing ones:
+
+```sql
+SET VARIABLE config_paths = [
+    '/etc/myapp/config.json',        -- System config
+    '~/.config/myapp/config.json',   -- User config
+    './config.json'                   -- Local override
+];
+
+-- Reads all configs that exist, ignores missing
+SELECT * FROM read_json('pathvariable:no-missing:config_paths');
+```
+
+### Path Construction with Passthrough
+
+When mixing protocols, use passthrough modifiers to prevent mangling:
+
+```sql
+SET VARIABLE sources = [
+    'data+varchar:inline,data\n1,2',  -- Inline data
+    's3://bucket/remote.csv',          -- Remote file
+    '/local/file.csv'                  -- Local file
+];
+
+-- Append suffix only to local paths, leave protocols alone
+SELECT * FROM read_csv('pathvariable:no-scalarfs:no-protocols:append:sources!/subdir');
+-- Results in:
+--   data+varchar:inline,data\n1,2     (unchanged - scalarfs protocol)
+--   s3://bucket/remote.csv            (unchanged - explicit protocol)
+--   /local/file.csv/subdir            (appended)
+```
+
+### Cartesian Product with Lists
+
+When both base variable and append value are lists, creates all combinations:
+
+```sql
+SET VARIABLE roots = ['/data/primary', '/data/backup'];
+SET VARIABLE tables = ['users.parquet', 'orders.parquet'];
+
+-- All combinations: 4 paths total
+SELECT * FROM read_parquet('pathvariable:no-missing:append:roots!$tables');
+-- Tries: /data/primary/users.parquet, /data/primary/orders.parquet,
+--        /data/backup/users.parquet, /data/backup/orders.parquet
+-- Reads all that exist
 ```
 
 ## Key Difference from variable:

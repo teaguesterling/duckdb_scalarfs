@@ -1,0 +1,301 @@
+# name: test/sql/pathvariable_modifiers.test
+# description: Test pathvariable: modifiers (no-glob, search, no-missing, append, prepend)
+# group: [sql]
+
+require scalarfs
+
+# =============================================================================
+# Setup: Create test files
+# =============================================================================
+
+statement ok
+COPY (SELECT 'mod1' as src, 1 as val) TO '__mod_test1.csv' (FORMAT csv, HEADER true);
+
+statement ok
+COPY (SELECT 'mod2' as src, 2 as val) TO '__mod_test2.csv' (FORMAT csv, HEADER true);
+
+statement ok
+COPY (SELECT 'mod3' as src, 3 as val) TO '__mod_test3.csv' (FORMAT csv, HEADER true);
+
+# =============================================================================
+# no-glob modifier
+# =============================================================================
+
+# Without no-glob: glob pattern expands
+statement ok
+SET VARIABLE glob_path = '__mod_test*.csv';
+
+query I
+SELECT count(*) FROM glob('pathvariable:glob_path');
+----
+3
+
+# With no-glob: glob pattern is literal
+query I
+SELECT file FROM glob('pathvariable:no-glob:glob_path');
+----
+__mod_test*.csv
+
+# =============================================================================
+# search modifier - returns first existing match
+# =============================================================================
+
+# Search finds first existing file in original order
+statement ok
+SET VARIABLE search_paths = ['__nonexistent1.csv', '__nonexistent2.csv', '__mod_test2.csv', '__mod_test1.csv'];
+
+query I
+SELECT file FROM glob('pathvariable:search:search_paths');
+----
+__mod_test2.csv
+
+# Search with all non-existent returns empty (causes error when reading)
+statement ok
+SET VARIABLE all_missing = ['__nope1.csv', '__nope2.csv'];
+
+query I
+SELECT count(*) FROM glob('pathvariable:search:all_missing');
+----
+0
+
+# =============================================================================
+# no-missing modifier - filters out non-existent files
+# =============================================================================
+
+statement ok
+SET VARIABLE mixed_paths = ['__nonexistent.csv', '__mod_test1.csv', '__also_missing.csv', '__mod_test2.csv'];
+
+query I
+SELECT file FROM glob('pathvariable:no-missing:mixed_paths') ORDER BY file;
+----
+__mod_test1.csv
+__mod_test2.csv
+
+# All missing returns empty
+query I
+SELECT count(*) FROM glob('pathvariable:no-missing:all_missing');
+----
+0
+
+# =============================================================================
+# append modifier - appends value to each path
+# =============================================================================
+
+# Append literal
+statement ok
+SET VARIABLE roots = ['root1', 'root2'];
+
+query I
+SELECT file FROM glob('pathvariable:no-glob:append:roots!/data.csv') ORDER BY file;
+----
+root1/data.csv
+root2/data.csv
+
+# Append with path delimiter handling (no double slashes)
+statement ok
+SET VARIABLE roots_slash = ['root1/', 'root2/'];
+
+query I
+SELECT file FROM glob('pathvariable:no-glob:append:roots_slash!/data.csv') ORDER BY file;
+----
+root1/data.csv
+root2/data.csv
+
+# Append variable reference
+statement ok
+SET VARIABLE suffix_var = 'subdir/file.csv';
+
+query I
+SELECT file FROM glob('pathvariable:no-glob:append:roots!$suffix_var') ORDER BY file;
+----
+root1/subdir/file.csv
+root2/subdir/file.csv
+
+# =============================================================================
+# prepend modifier - prepends value to each path
+# =============================================================================
+
+statement ok
+SET VARIABLE rel_paths = ['data/a.csv', 'data/b.csv'];
+
+# Prepend literal
+query I
+SELECT file FROM glob('pathvariable:no-glob:prepend:rel_paths!/base') ORDER BY file;
+----
+/base/data/a.csv
+/base/data/b.csv
+
+# Prepend variable reference
+statement ok
+SET VARIABLE prefix_var = 's3://bucket';
+
+query I
+SELECT file FROM glob('pathvariable:no-glob:prepend:rel_paths!$prefix_var') ORDER BY file;
+----
+s3://bucket/data/a.csv
+s3://bucket/data/b.csv
+
+# =============================================================================
+# Combined modifiers
+# =============================================================================
+
+# append + search: construct path and find first existing
+statement ok
+SET VARIABLE test_roots = ['__nonexistent_root', '.'];
+
+query I
+SELECT file FROM glob('pathvariable:append:search:test_roots!/__mod_test1.csv');
+----
+./__mod_test1.csv
+
+# append + no-missing: construct paths and filter non-existent
+query I
+SELECT file FROM glob('pathvariable:append:no-missing:test_roots!/__mod_test*.csv') ORDER BY file;
+----
+./__mod_test1.csv
+./__mod_test2.csv
+./__mod_test3.csv
+
+# no-glob + append: append without glob expansion
+statement ok
+SET VARIABLE base = ['dir'];
+
+query I
+SELECT file FROM glob('pathvariable:no-glob:append:base!/*.csv');
+----
+dir/*.csv
+
+# =============================================================================
+# Virtual protocols with search/no-missing
+# =============================================================================
+
+# data+varchar: URLs are treated as existing
+statement ok
+SET VARIABLE virtual_paths = ['__nonexistent.csv', 'data+varchar:col,value', '__mod_test1.csv'];
+
+query I
+SELECT file FROM glob('pathvariable:search:virtual_paths');
+----
+data+varchar:col,value
+
+# variable: URLs are treated as existing
+statement ok
+SET VARIABLE some_var = 'content';
+
+statement ok
+SET VARIABLE var_paths = ['__nonexistent.csv', 'variable:some_var', '__mod_test1.csv'];
+
+query I
+SELECT file FROM glob('pathvariable:search:var_paths');
+----
+variable:some_var
+
+# =============================================================================
+# Cartesian product with list variables
+# =============================================================================
+
+# append with list variable = cartesian product
+statement ok
+SET VARIABLE cart_roots = ['r1', 'r2'];
+
+statement ok
+SET VARIABLE cart_files = ['a.csv', 'b.csv'];
+
+query I
+SELECT file FROM glob('pathvariable:no-glob:append:cart_roots!$cart_files') ORDER BY file;
+----
+r1/a.csv
+r1/b.csv
+r2/a.csv
+r2/b.csv
+
+# =============================================================================
+# Real-world use case: multi-root search
+# =============================================================================
+
+# Simulate local cache -> remote fallback pattern
+statement ok
+SET VARIABLE blob_roots = ['__local_cache', '.'];
+
+# First root doesn't have the file, second does
+query II
+SELECT * FROM read_csv('pathvariable:append:search:blob_roots!/__mod_test1.csv');
+----
+mod1	1
+
+# =============================================================================
+# no-scalarfs modifier - don't modify scalarfs protocol paths
+# =============================================================================
+
+statement ok
+SET VARIABLE scalarfs_mixed = ['data+varchar:content', '/local/file.csv', 'variable:some_var'];
+
+# Without passthru: all paths get suffix appended (breaks scalarfs URLs)
+query I
+SELECT file FROM glob('pathvariable:no-glob:append:scalarfs_mixed!/suffix') ORDER BY file;
+----
+/local/file.csv/suffix
+data+varchar:content/suffix
+variable:some_var/suffix
+
+# With no-scalarfs: scalarfs paths unchanged, others get suffix
+query I
+SELECT file FROM glob('pathvariable:no-glob:no-scalarfs:append:scalarfs_mixed!/suffix') ORDER BY file;
+----
+/local/file.csv/suffix
+data+varchar:content
+variable:some_var
+
+# =============================================================================
+# no-protocols modifier - don't modify paths with explicit protocols
+# =============================================================================
+
+statement ok
+SET VARIABLE protocol_mixed = ['s3://bucket/path', '/local/file.csv', 'https://example.com/data'];
+
+# Without passthru: all paths get suffix
+query I
+SELECT file FROM glob('pathvariable:no-glob:append:protocol_mixed!/suffix') ORDER BY file;
+----
+/local/file.csv/suffix
+https://example.com/data/suffix
+s3://bucket/path/suffix
+
+# With no-protocols: protocol paths unchanged
+query I
+SELECT file FROM glob('pathvariable:no-glob:no-protocols:append:protocol_mixed!/suffix') ORDER BY file;
+----
+/local/file.csv/suffix
+https://example.com/data
+s3://bucket/path
+
+# Both passthru modifiers can be combined
+statement ok
+SET VARIABLE all_mixed = ['data+varchar:x', 's3://bucket', '/local/path'];
+
+query I
+SELECT file FROM glob('pathvariable:no-glob:no-scalarfs:no-protocols:append:all_mixed!/sfx') ORDER BY file;
+----
+/local/path/sfx
+data+varchar:x
+s3://bucket
+
+# =============================================================================
+# Error cases
+# =============================================================================
+
+# Unknown modifier is treated as variable name (will error on not found)
+statement error
+SELECT * FROM read_csv('pathvariable:unknown_modifier:some_var');
+----
+not found
+
+# Append without value - variable name includes the !
+statement ok
+SET VARIABLE append_no_val = '__mod_test1.csv';
+
+# This should work - "append" is modifier, variable is "append_no_val" (no ! means no value)
+query I
+SELECT count(*) FROM read_csv('pathvariable:append_no_val');
+----
+1

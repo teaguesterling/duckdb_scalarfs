@@ -6,6 +6,7 @@
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/function/scalar/string_common.hpp"
 #include "duckdb/main/client_config.hpp"
+#include <algorithm>
 
 namespace duckdb {
 
@@ -30,7 +31,7 @@ void PathVariableFileHandle::Close() {
 // =============================================================================
 
 bool PathVariableFileSystem::CanHandleFile(const string &fpath) {
-	return StringUtil::StartsWith(fpath, "pathvariable:") || StringUtil::StartsWith(fpath, "tmp_pathvariable:");
+	return PathVariableParser::CanHandle(fpath);
 }
 
 string PathVariableFileSystem::GetName() const {
@@ -38,16 +39,13 @@ string PathVariableFileSystem::GetName() const {
 }
 
 bool PathVariableFileSystem::IsTempPath(const string &path) {
-	return StringUtil::StartsWith(path, "tmp_pathvariable:");
+	return PathVariableParser::IsTempPath(path);
 }
 
 string PathVariableFileSystem::ExtractVariableName(const string &path) {
-	// Extract variable name from path
-	// Both "pathvariable:foo" and "tmp_pathvariable:foo" refer to variable "foo"
-	if (StringUtil::StartsWith(path, "tmp_pathvariable:")) {
-		return path.substr(17); // len("tmp_pathvariable:")
-	}
-	return path.substr(13); // len("pathvariable:")
+	// Use the parser to extract variable name (handles modifiers)
+	auto parsed = PathVariableParser::Parse(path);
+	return parsed.variable_name;
 }
 
 string PathVariableFileSystem::ComputeTempPath(const string &target_path) {
@@ -206,17 +204,31 @@ unique_ptr<FileHandle> PathVariableFileSystem::OpenFile(const string &path, File
 
 vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener *opener) {
 	// =============================================================================
-	// Multi-level glob implementation:
-	// Level 1: Glob on variable names (pathvariable:data_* matches data_01, data_02)
-	// Level 1b: List expansion (if variable is VARCHAR[], expand to multiple paths)
-	// Level 2: Glob within paths (if data_01 = '/data/*.csv', expands that too)
+	// Multi-level glob implementation with modifier support:
+	//
+	// Modifiers:
+	//   no-glob        - Disable glob expansion in paths
+	//   search         - Return only first existing match
+	//   ignore-missing - Skip non-existent files
+	//   reverse        - Reverse path order
+	//   shuffle        - Randomize path order
+	//   append!value   - Append value to each path
+	//   prepend!value  - Prepend value to each path
+	//
+	// Levels:
+	//   Level 1: Glob on variable names (pathvariable:data_* matches data_01, data_02)
+	//   Level 1b: List expansion (if variable is VARCHAR[], expand to multiple paths)
+	//   Level 2: Glob within paths (if data_01 = '/data/*.csv', expands that too)
+	//            (disabled by no-glob modifier)
 	// =============================================================================
 
 	if (!CanHandleFile(path)) {
 		return {};
 	}
 
-	string pattern = ExtractVariableName(path);
+	// Parse the path to extract modifiers and variable name
+	auto parsed = PathVariableParser::Parse(path);
+	string pattern = parsed.variable_name;
 
 	// Get client context for variable access
 	auto context = FileOpener::TryGetClientContext(opener);
@@ -263,24 +275,104 @@ vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener
 		return true;
 	};
 
+	// Helper to resolve a PathVariableValue (literal or variable reference)
+	auto resolve_value = [&config](const PathVariableValue &pv_value) -> vector<string> {
+		if (pv_value.IsEmpty()) {
+			return {};
+		}
+		if (!pv_value.is_variable) {
+			// Literal value
+			return {pv_value.value};
+		}
+		// Variable reference - look up the variable
+		Value var_result;
+		if (!config.GetUserVariable(pv_value.value, var_result)) {
+			throw IOException("Variable '%s' (referenced in modifier) not found", pv_value.value);
+		}
+		if (var_result.IsNull()) {
+			throw IOException("Variable '%s' (referenced in modifier) is NULL", pv_value.value);
+		}
+		vector<string> values;
+		auto &type = var_result.type();
+		if (type.id() == LogicalTypeId::LIST) {
+			auto &child_type = ListType::GetChildType(type);
+			if (child_type.id() != LogicalTypeId::VARCHAR && child_type.id() != LogicalTypeId::BLOB) {
+				throw IOException("Variable '%s' list child type must be VARCHAR or BLOB", pv_value.value);
+			}
+			auto &children = ListValue::GetChildren(var_result);
+			for (const auto &child : children) {
+				if (!child.IsNull()) {
+					values.push_back(child.ToString());
+				}
+			}
+		} else if (type.id() == LogicalTypeId::VARCHAR || type.id() == LogicalTypeId::BLOB) {
+			values.push_back(var_result.ToString());
+		} else {
+			throw IOException("Variable '%s' must be VARCHAR, BLOB, or list of these", pv_value.value);
+		}
+		return values;
+	};
+
+	// Helper to join two path components with proper delimiter handling
+	auto join_paths = [](const string &base, const string &suffix) -> string {
+		if (base.empty()) {
+			return suffix;
+		}
+		if (suffix.empty()) {
+			return base;
+		}
+		// Handle trailing slash on base and leading slash on suffix
+		bool base_has_slash = (base.back() == '/' || base.back() == '\\');
+		bool suffix_has_slash = (suffix.front() == '/' || suffix.front() == '\\');
+		if (base_has_slash && suffix_has_slash) {
+			return base + suffix.substr(1);
+		}
+		if (!base_has_slash && !suffix_has_slash) {
+			return base + "/" + suffix;
+		}
+		return base + suffix;
+	};
+
+	// Helper to check if a path is a scalarfs protocol (should be passed through without modification)
+	auto is_scalarfs_path = [](const string &p) -> bool {
+		return StringUtil::StartsWith(p, "data:") || StringUtil::StartsWith(p, "data+varchar:") ||
+		       StringUtil::StartsWith(p, "data+blob:") || StringUtil::StartsWith(p, "variable:") ||
+		       StringUtil::StartsWith(p, "pathvariable:");
+	};
+
+	// Helper to check if a path has an explicit protocol (e.g., s3://, https://, file://)
+	auto has_explicit_protocol = [](const string &p) -> bool {
+		auto pos = p.find("://");
+		// Must have :// and some protocol name before it
+		return pos != string::npos && pos > 0 && pos < 20; // reasonable protocol name length
+	};
+
+	// Check which passthrough modes are enabled
+	bool passthru_scalarfs = parsed.HasModifier(PathVariableModifierFlag::PASSTHRU_SCALARFS);
+	bool passthru_explicit = parsed.HasModifier(PathVariableModifierFlag::PASSTHRU_EXPLICIT_FS);
+
+	// Helper to check if a path should be passed through (not modified by append/prepend)
+	auto should_passthru = [&](const string &p) -> bool {
+		if (passthru_scalarfs && is_scalarfs_path(p)) {
+			return true;
+		}
+		if (passthru_explicit && has_explicit_protocol(p)) {
+			return true;
+		}
+		return false;
+	};
+
 	// Check if the pattern contains glob characters
 	if (!FileSystem::HasGlob(pattern)) {
 		// No glob in variable name - resolve this single variable
-		// If variable doesn't exist or is invalid, we still try to get the path
-		// and let OpenFile handle the error (consistent with variable: behavior)
 		Value result;
 		if (!config.GetUserVariable(pattern, result)) {
-			// Variable not found - return the original path, let OpenFile throw the error
 			return {OpenFileInfo(path)};
 		}
 		if (result.IsNull()) {
-			// NULL variable - return the original path, let OpenFile throw the error
 			return {OpenFileInfo(path)};
 		}
-
-		// Extract paths (handles both scalar and list types)
 		if (!extract_paths_from_value(result, resolved_paths)) {
-			// Wrong type - return the original path, let OpenFile throw the error
 			return {OpenFileInfo(path)};
 		}
 	} else {
@@ -289,29 +381,88 @@ vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener
 			const string &var_name = entry.first;
 			const Value &var_value = entry.second;
 
-			// Match variable name against pattern
 			if (duckdb::Glob(var_name.c_str(), var_name.size(), pattern.c_str(), pattern.size())) {
-				// Extract paths from matching variable (handles scalar and list types)
 				extract_paths_from_value(var_value, resolved_paths);
 			}
 		}
 	}
 
-	// Level 2: Expand any globs within the resolved paths
-	// Note: parent_fs is an OpenerFileSystem which already has context,
-	// so we pass nullptr to avoid "cannot take an opener" errors
+	// Apply prepend modifier (before glob expansion)
+	if (parsed.HasModifier(PathVariableModifierFlag::PREPEND)) {
+		auto prepend_values = resolve_value(parsed.prepend_value);
+		if (!prepend_values.empty()) {
+			vector<string> new_paths;
+			// Cartesian product: prepend_values × resolved_paths
+			// But passthrough paths are kept unmodified
+			for (const auto &prefix : prepend_values) {
+				for (const auto &p : resolved_paths) {
+					if (should_passthru(p)) {
+						new_paths.push_back(p);
+					} else {
+						new_paths.push_back(join_paths(prefix, p));
+					}
+				}
+			}
+			resolved_paths = std::move(new_paths);
+		}
+	}
+
+	// Apply append modifier (before glob expansion)
+	if (parsed.HasModifier(PathVariableModifierFlag::APPEND)) {
+		auto append_values = resolve_value(parsed.append_value);
+		if (!append_values.empty()) {
+			vector<string> new_paths;
+			// Cartesian product: resolved_paths × append_values
+			// But passthrough paths are kept unmodified
+			for (const auto &p : resolved_paths) {
+				if (should_passthru(p)) {
+					new_paths.push_back(p);
+				} else {
+					for (const auto &suffix : append_values) {
+						new_paths.push_back(join_paths(p, suffix));
+					}
+				}
+			}
+			resolved_paths = std::move(new_paths);
+		}
+	}
+
+	// Level 2: Expand globs within paths (unless no-glob modifier is set)
 	vector<OpenFileInfo> result;
+	bool no_glob = parsed.HasModifier(PathVariableModifierFlag::NO_GLOB);
+
 	for (const string &resolved_path : resolved_paths) {
-		if (FileSystem::HasGlob(resolved_path)) {
-			// Path contains glob - expand it using parent filesystem
+		if (!no_glob && FileSystem::HasGlob(resolved_path)) {
 			auto expanded = parent_fs.Glob(resolved_path, nullptr);
 			for (auto &info : expanded) {
 				result.push_back(std::move(info));
 			}
 		} else {
-			// No glob in path - return as-is, let OpenFile handle errors
 			result.push_back(OpenFileInfo(resolved_path));
 		}
+	}
+
+	// Apply search modifier FIRST (before sorting) - returns first existing in original order
+	// This is important for multi-root search where order matters (local before remote)
+	if (parsed.HasModifier(PathVariableModifierFlag::SEARCH)) {
+		for (auto &info : result) {
+			if (parent_fs.FileExists(info.path, nullptr)) {
+				return {std::move(info)};
+			}
+		}
+		// No existing files found - return empty (will cause "no files found" error)
+		return {};
+	}
+
+	// Apply ignore-missing modifier (filter out non-existent files)
+	if (parsed.HasModifier(PathVariableModifierFlag::IGNORE_MISSING)) {
+		vector<OpenFileInfo> existing;
+		for (auto &info : result) {
+			if (parent_fs.FileExists(info.path, nullptr)) {
+				existing.push_back(std::move(info));
+			}
+		}
+		result = std::move(existing);
 	}
 
 	// Sort for deterministic ordering

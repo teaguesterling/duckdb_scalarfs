@@ -9,3 +9,7 @@ test/python/__pycache__/
 
 # Generated test files
 __pathvar_*
+__mod_test*.csv
+__test_mod*.csv
+aaa.csv
+zzz.csv

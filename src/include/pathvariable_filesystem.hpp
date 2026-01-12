@@ -4,6 +4,7 @@
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/open_file_info.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "pathvariable_modifiers.hpp"
 
 namespace duckdb {
 

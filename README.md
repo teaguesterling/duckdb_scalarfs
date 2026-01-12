@@ -263,6 +263,66 @@ END;
 SELECT * FROM read_json('pathvariable:config_path');
 ```
 
+#### Modifiers
+
+Modifiers control how paths are resolved, filtered, and constructed:
+
+```
+pathvariable:[modifier:]...variable_name[!value]
+```
+
+| Modifier | Description |
+|----------|-------------|
+| `search` | Return only the first existing file (for multi-root fallback) |
+| `no-missing` | Skip non-existent files instead of erroring |
+| `no-glob` | Disable glob pattern expansion in paths |
+| `no-scalarfs` | Don't modify scalarfs protocol paths with append/prepend |
+| `no-protocols` | Don't modify paths with explicit protocols (://) with append/prepend |
+| `no-cache` | Disable caching of path resolution |
+| `append!/path` | Append literal path to each base path |
+| `append!$var` | Append value of variable to each base path |
+| `prepend!/path` | Prepend literal path to each base path |
+| `prepend!$var` | Prepend value of variable to each base path |
+
+**Multi-Root Search** — Create a custom search path (like `file_search_path`) that checks local cache before remote:
+
+```sql
+-- Define search roots: local first, then remote
+SET VARIABLE search_roots = [
+    '/home/user/.cache/myapp/data',
+    's3://company-bucket/shared/data'
+];
+
+-- Search returns FIRST existing match (local cache wins if present)
+SELECT * FROM read_parquet(
+    format('pathvariable:append:search:search_roots!/reports/{}.parquet', report_id)
+);
+```
+
+**Cartesian Product** — When both base and append values are lists:
+
+```sql
+SET VARIABLE roots = ['/data/primary', '/data/backup'];
+SET VARIABLE tables = ['users.parquet', 'orders.parquet'];
+
+-- All combinations: 4 paths total
+SELECT * FROM read_parquet('pathvariable:no-missing:append:roots!$tables');
+-- Tries: /data/primary/users.parquet, /data/primary/orders.parquet,
+--        /data/backup/users.parquet, /data/backup/orders.parquet
+```
+
+**Protocol Passthrough** — Prevent append/prepend from mangling protocol URLs:
+
+```sql
+SET VARIABLE sources = ['data+varchar:a,b\n1,2', 's3://bucket/data.csv', '/local/file.csv'];
+
+-- Only append to local paths, leave protocols unchanged
+SELECT * FROM read_csv('pathvariable:no-scalarfs:no-protocols:append:sources!/subdir');
+-- Results: data+varchar:a,b\n1,2, s3://bucket/data.csv, /local/file.csv/subdir
+```
+
+See [pathvariable: Protocol Documentation](docs/protocols/pathvariable.md) for full details.
+
 ### `data+varchar:` — Raw Inline Content
 
 Embed content directly in your query with zero encoding overhead.
