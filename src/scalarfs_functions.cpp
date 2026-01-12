@@ -117,17 +117,26 @@ static string DecodeDataUri(const string_t &input) {
 	// URL decode
 	string result;
 	for (size_t i = 0; i < data.size(); i++) {
-		if (data[i] == '%' && i + 2 < data.size()) {
-			char hex[3] = {data[i + 1], data[i + 2], '\0'};
-			char *end;
-			long val = strtol(hex, &end, 16);
-			if (end == hex + 2) {
-				result += static_cast<char>(val);
-				i += 2;
-				continue;
+		if (data[i] == '%') {
+			if (i + 2 >= data.size()) {
+				throw InvalidInputException("Invalid URL encoding - incomplete '%%' escape at position %d", i);
 			}
+			char c1 = data[i + 1];
+			char c2 = data[i + 2];
+			// Validate hex characters
+			bool valid_hex = ((c1 >= '0' && c1 <= '9') || (c1 >= 'A' && c1 <= 'F') || (c1 >= 'a' && c1 <= 'f')) &&
+			                 ((c2 >= '0' && c2 <= '9') || (c2 >= 'A' && c2 <= 'F') || (c2 >= 'a' && c2 <= 'f'));
+			if (!valid_hex) {
+				throw InvalidInputException("Invalid URL encoding - '%%%c%c' is not valid hex at position %d", c1, c2,
+				                            i);
+			}
+			char hex[3] = {c1, c2, '\0'};
+			long val = strtol(hex, nullptr, 16);
+			result += static_cast<char>(val);
+			i += 2;
+		} else {
+			result += data[i];
 		}
-		result += data[i];
 	}
 	return result;
 }

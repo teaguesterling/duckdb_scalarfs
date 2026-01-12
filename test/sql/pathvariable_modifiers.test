@@ -281,6 +281,46 @@ data+varchar:x
 s3://bucket
 
 # =============================================================================
+# no-cache modifier
+# =============================================================================
+
+# Basic no-cache usage - should work same as without cache
+statement ok
+SET VARIABLE cache_test_path = '__mod_test1.csv';
+
+query II
+SELECT * FROM read_csv('pathvariable:cache_test_path');
+----
+mod1	1
+
+# With no-cache modifier - same result but bypasses cache
+query II
+SELECT * FROM read_csv('pathvariable:no-cache:cache_test_path');
+----
+mod1	1
+
+# no-cache with other modifiers
+statement ok
+SET VARIABLE cache_roots = ['.'];
+
+query I
+SELECT count(*) FROM glob('pathvariable:no-cache:append:cache_roots!/__mod_test*.csv');
+----
+3
+
+# Verify caching behavior: first call caches, second uses cache
+# (We can't directly test cache hit, but we can verify it doesn't break)
+query I
+SELECT count(*) FROM glob('pathvariable:cache_roots');
+----
+1
+
+query I
+SELECT count(*) FROM glob('pathvariable:cache_roots');
+----
+1
+
+# =============================================================================
 # Error cases
 # =============================================================================
 

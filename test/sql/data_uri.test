@@ -149,6 +149,30 @@ SELECT * FROM read_text('data:;base64,abc');
 ----
 base64
 
+# Invalid URL encoding - incomplete escape
+statement error
+SELECT * FROM read_text('data:,hello%2');
+----
+Invalid URL encoding
+
+# Invalid URL encoding - incomplete escape at end
+statement error
+SELECT * FROM read_text('data:,test%');
+----
+Invalid URL encoding
+
+# Invalid URL encoding - non-hex characters
+statement error
+SELECT * FROM read_text('data:,hello%GG');
+----
+Invalid URL encoding
+
+# Invalid URL encoding - mixed valid/invalid
+statement error
+SELECT * FROM read_text('data:,%20%ZZ');
+----
+Invalid URL encoding
+
 # =============================================================================
 # Read-only verification
 # =============================================================================

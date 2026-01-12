@@ -29,7 +29,7 @@ Modifiers control how paths are resolved, filtered, and constructed. They can be
 | `no-glob` | Disable glob pattern expansion in paths |
 | `no-scalarfs` | Don't modify scalarfs protocol paths with append/prepend |
 | `no-protocols` | Don't modify paths with explicit protocols (://) with append/prepend |
-| `no-cache` | Disable caching of path resolution |
+| `no-cache` | Reserved for future caching control (currently no-op) |
 | `append!/path` | Append literal path to each base path |
 | `append!$var` | Append value of variable to each base path |
 | `prepend!/path` | Prepend literal path to each base path |

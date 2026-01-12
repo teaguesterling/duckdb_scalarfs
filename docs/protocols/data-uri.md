@@ -174,6 +174,18 @@ SELECT * FROM read_text('data:;base64,not-valid-base64!!!');
 -- Error: Invalid base64 encoding
 ```
 
+### Invalid URL Encoding
+
+```sql
+-- Incomplete escape sequence
+SELECT * FROM read_text('data:,hello%2');
+-- Error: Invalid URL encoding - incomplete '%' escape at position 5
+
+-- Invalid hex characters
+SELECT * FROM read_text('data:,hello%GG');
+-- Error: Invalid URL encoding - '%GG' is not valid hex at position 5
+```
+
 ## See Also
 
 - [data+varchar: Protocol](data-varchar.md) — Zero-overhead alternative for text

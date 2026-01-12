@@ -173,17 +173,27 @@ string DataURIFileSystem::DecodeURLEncoded(const string &input) {
 	result.reserve(input.size());
 
 	for (size_t i = 0; i < input.size(); i++) {
-		if (input[i] == '%' && i + 2 < input.size()) {
-			char hex[3] = {input[i + 1], input[i + 2], '\0'};
-			char *end;
-			long val = strtol(hex, &end, 16);
-			if (end == hex + 2) {
-				result += static_cast<char>(val);
-				i += 2;
-				continue;
+		if (input[i] == '%') {
+			if (i + 2 >= input.size()) {
+				throw IOException("Invalid URL encoding - incomplete '%%' escape at position %llu",
+				                  (unsigned long long)i);
 			}
+			char c1 = input[i + 1];
+			char c2 = input[i + 2];
+			// Validate hex characters
+			bool valid_hex = ((c1 >= '0' && c1 <= '9') || (c1 >= 'A' && c1 <= 'F') || (c1 >= 'a' && c1 <= 'f')) &&
+			                 ((c2 >= '0' && c2 <= '9') || (c2 >= 'A' && c2 <= 'F') || (c2 >= 'a' && c2 <= 'f'));
+			if (!valid_hex) {
+				throw IOException("Invalid URL encoding - '%%%c%c' is not valid hex at position %llu", c1, c2,
+				                  (unsigned long long)i);
+			}
+			char hex[3] = {c1, c2, '\0'};
+			long val = strtol(hex, nullptr, 16);
+			result += static_cast<char>(val);
+			i += 2;
+		} else {
+			result += input[i];
 		}
-		result += input[i];
 	}
 
 	return result;

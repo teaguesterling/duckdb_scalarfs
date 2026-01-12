@@ -5,6 +5,8 @@
 #include "duckdb/common/open_file_info.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "pathvariable_modifiers.hpp"
+#include <mutex>
+#include <unordered_map>
 
 namespace duckdb {
 
@@ -90,6 +92,15 @@ private:
 
 	// Get the parent filesystem for delegation
 	FileSystem &GetParentFileSystem(optional_ptr<FileOpener> opener);
+
+	// Glob result cache
+	// Key: pathvariable: path string (including modifiers)
+	// Value: vector of resolved OpenFileInfo results
+	mutable std::mutex cache_mutex;
+	mutable std::unordered_map<string, vector<OpenFileInfo>> glob_cache;
+
+	// Clear the glob cache (for testing or manual invalidation)
+	void ClearCache();
 };
 
 // =============================================================================

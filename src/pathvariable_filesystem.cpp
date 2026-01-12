@@ -202,6 +202,11 @@ unique_ptr<FileHandle> PathVariableFileSystem::OpenFile(const string &path, File
 	return make_uniq<PathVariableFileHandle>(*this, path, std::move(underlying_handle), parent_fs);
 }
 
+void PathVariableFileSystem::ClearCache() {
+	std::lock_guard<std::mutex> lock(cache_mutex);
+	glob_cache.clear();
+}
+
 vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener *opener) {
 	// =============================================================================
 	// Multi-level glob implementation with modifier support:
@@ -209,9 +214,10 @@ vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener
 	// Modifiers:
 	//   no-glob        - Disable glob expansion in paths
 	//   search         - Return only first existing match
-	//   ignore-missing - Skip non-existent files
-	//   reverse        - Reverse path order
-	//   shuffle        - Randomize path order
+	//   no-missing     - Skip non-existent files
+	//   no-cache       - Disable caching of glob results
+	//   no-scalarfs    - Don't modify scalarfs protocol paths with append/prepend
+	//   no-protocols   - Don't modify explicit protocol paths with append/prepend
 	//   append!value   - Append value to each path
 	//   prepend!value  - Prepend value to each path
 	//
@@ -228,6 +234,12 @@ vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener
 
 	// Parse the path to extract modifiers and variable name
 	auto parsed = PathVariableParser::Parse(path);
+
+	// Caching is disabled by default because variable values can change between queries.
+	// The no-cache modifier exists for documentation/future use but caching is currently
+	// not implemented due to cache invalidation complexity.
+	// TODO: Implement proper cache invalidation (e.g., based on variable value hash)
+	bool use_cache = false; // Caching disabled until proper invalidation is implemented
 	string pattern = parsed.variable_name;
 
 	// Get client context for variable access
@@ -454,7 +466,7 @@ vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener
 		return {};
 	}
 
-	// Apply ignore-missing modifier (filter out non-existent files)
+	// Apply no-missing modifier (filter out non-existent files)
 	if (parsed.HasModifier(PathVariableModifierFlag::IGNORE_MISSING)) {
 		vector<OpenFileInfo> existing;
 		for (auto &info : result) {
@@ -468,6 +480,12 @@ vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener
 	// Sort for deterministic ordering
 	std::sort(result.begin(), result.end(),
 	          [](const OpenFileInfo &a, const OpenFileInfo &b) { return a.path < b.path; });
+
+	// Store in cache (unless no-cache modifier is set)
+	if (use_cache) {
+		std::lock_guard<std::mutex> lock(cache_mutex);
+		glob_cache[path] = result;
+	}
 
 	return result;
 }

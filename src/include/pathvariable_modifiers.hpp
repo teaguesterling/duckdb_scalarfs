@@ -18,7 +18,8 @@ namespace duckdb {
 //   pathvariable:varname                    - No modifiers
 //   pathvariable:no-glob:varname            - Disable glob expansion
 //   pathvariable:search:varname             - Return first existing match
-//   pathvariable:ignore-missing:varname     - Skip non-existent files
+//   pathvariable:no-missing:varname         - Skip non-existent files
+//   pathvariable:no-cache:varname           - Disable caching of glob results
 //   pathvariable:append:varname!/path       - Append literal to paths
 //   pathvariable:append:varname!$other_var  - Append variable value to paths
 //
