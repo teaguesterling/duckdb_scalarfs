@@ -18,6 +18,8 @@ DuckDB's file functions (`read_csv`, `read_json`, `COPY TO`, etc.) expect file p
 | `data:` | RFC 2397 data URI (base64/url-encoded) | Read |
 | `data+varchar:` | Raw VARCHAR content as file | Read |
 | `data+blob:` | Escaped BLOB content as file | Read |
+| `decompress+gz:` | Gzip decompression wrapper | Read |
+| `decompress+zstd:` | Zstd decompression wrapper | Read |
 
 ## Quick Example
 
@@ -80,4 +82,5 @@ Ready to use scalarfs? Check out the [Installation Guide](getting-started/instal
 - **Data URIs** — Use RFC 2397 data URIs with `data:;base64,...`
 - **Zero-Overhead Inline** — Embed content directly with `data+varchar:content`
 - **Binary Support** — Handle binary content with `data+blob:...` escape sequences
+- **Decompression Wrappers** — Transparently decompress gzip/zstd with `decompress+gz:` and `decompress+zstd:`
 - **Helper Functions** — Convert between content and URIs with `to_*_uri()` and `from_*_uri()`

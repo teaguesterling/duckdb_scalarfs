@@ -1,6 +1,6 @@
 # Protocol Overview
 
-scalarfs provides five protocols for accessing in-memory content as files. Each protocol is suited for different use cases.
+scalarfs provides seven protocols for accessing in-memory content as files. Each protocol is suited for different use cases.
 
 ## Protocol Summary
 
@@ -11,6 +11,8 @@ scalarfs provides five protocols for accessing in-memory content as files. Each 
 | `data:` | `data:[mediatype][;base64],content` | Read | Standards-compliant data URIs |
 | `data+varchar:` | `data+varchar:content` | Read | Zero-overhead inline text |
 | `data+blob:` | `data+blob:escaped_content` | Read | Text with control characters |
+| `decompress+gz:` | `decompress+gz:path_or_protocol` | Read | Transparent gzip decompression |
+| `decompress+zstd:` | `decompress+zstd:path_or_protocol` | Read | Transparent zstd decompression |
 
 ## Choosing a Protocol
 
@@ -69,6 +71,21 @@ SELECT * FROM read_csv('data:;base64,bmFtZSxzY29yZQpBbGljZSw5NQ==');
 SELECT * FROM read_text('data+blob:line1\nline2\ttabbed');
 ```
 
+### Use `decompress+gz:` or `decompress+zstd:` when you need to:
+
+- Decompress content that `read_blob` doesn't auto-decompress
+- Decompress content stored in variables or data URIs
+- Chain decompression with other scalarfs protocols
+
+```sql
+-- Decompress gzipped content from a variable
+SET VARIABLE gzipped = from_base64('H4sIAAAAAAAAA/NIzcnJ11EIzy/KSQEAxoZbJgwAAAA=');
+SELECT * FROM read_text('decompress+gz:variable:gzipped');
+
+-- Decompress zstd file
+SELECT * FROM read_blob('decompress+zstd:/path/to/data.bin.zst');
+```
+
 ## Protocol Comparison
 
 ### Encoding Overhead
@@ -100,6 +117,8 @@ SELECT * FROM read_text('data+blob:line1\nline2\ttabbed');
 | `data+varchar:` | ❌ No |
 | `data+blob:` | ❌ No |
 | `data:` | ❌ No |
+| `decompress+gz:` | ❌ No |
+| `decompress+zstd:` | ❌ No |
 
 ## Pattern Matching
 
@@ -127,3 +146,4 @@ See [Variable Protocol](variable.md) and [PathVariable Protocol](pathvariable.md
 - [data: Protocol](data-uri.md) — RFC 2397 data URIs
 - [data+varchar: Protocol](data-varchar.md) — Zero-overhead inline content
 - [data+blob: Protocol](data-blob.md) — Escaped binary content
+- [decompress+gz: / decompress+zstd:](../README.md#decompress+gz--decompress+zstd--decompression-wrappers) — Transparent decompression wrappers
