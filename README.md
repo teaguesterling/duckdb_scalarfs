@@ -16,6 +16,7 @@ DuckDB's file functions (`read_csv`, `read_json`, `COPY TO`, etc.) expect file p
 | `data:` | RFC 2397 data URI (base64/url-encoded) | Read |
 | `data+varchar:` | Raw VARCHAR content as file | Read |
 | `data+blob:` | Escaped BLOB content as file | Read |
+| `decompress+gz:` | Gzip decompression wrapper | Read |
 
 ## Quick Start
 
@@ -371,6 +372,39 @@ SELECT * FROM read_text('data+blob:line1\nline2\nline3');
 -- Supported escapes: \n \r \t \0 \\ \xNN
 SELECT * FROM read_text('data+blob:tab\there\nnewline\nand hex: \x41\x42\x43');
 ```
+
+### `decompress+gz:` — Gzip Decompression Wrapper
+
+Transparently decompress gzip content from any source. Wraps any path or protocol.
+
+```sql
+-- Decompress a local file (useful when read_blob doesn't auto-decompress)
+SELECT * FROM read_blob('decompress+gz:/path/to/data.bin.gz');
+
+-- Decompress gzipped content stored in a variable
+SET VARIABLE gzipped_data = from_base64('H4sIAAAAAAAAA/NIzcnJ11EIzy/KSQEAxoZbJgwAAAA=');
+SELECT * FROM read_text('decompress+gz:variable:gzipped_data');
+
+-- Decompress inline gzipped base64 data
+SELECT * FROM read_text('decompress+gz:data:;base64,H4sIAAAAAAAAA/NIzcnJ11EIzy/KSQEAxoZbJgwAAAA=');
+
+-- Chain with pathvariable for dynamic paths
+SET VARIABLE gz_path = 's3://bucket/data.csv.gz';
+SELECT * FROM read_csv('decompress+gz:pathvariable:gz_path');
+```
+
+**Note:** `decompress+zstd:` is planned but not yet implemented.
+
+**Comparison with zipfs `archive:` protocol:**
+
+| Feature | `decompress+gz:` (scalarfs) | `archive:` (zipfs) |
+|---------|----------------------------|-------------------|
+| Format | gzip streams | zip archives only |
+| Purpose | Decompress single stream | Access files within .zip |
+| Use case | `.gz` files, compressed variables | Multi-file zip archives |
+| Syntax | `decompress+gz:/path/file.gz` | `archive:///path/file.zip/entry.csv` |
+
+The zipfs `archive:` protocol extracts files from zip archives (e.g., `archive:///data.zip/file.csv`). It does **not** handle gzip files - use `decompress+gz:` for those.
 
 ## Helper Functions
 

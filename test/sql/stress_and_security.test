@@ -44,15 +44,15 @@ SELECT content FROM read_text('variable:null_var');
 ----
 Variable 'null_var' is NULL
 
-# BLOB variable - note: ToString() gives escaped representation
-# The BLOB '\x00\x01\x02\xFF' becomes the string "\x00\x01\x02\xFF" (16 chars)
+# BLOB variable - returns raw bytes (not escaped representation)
+# The BLOB '\x00\x01\x02\xFF' is 4 bytes
 statement ok
 SET VARIABLE blob_var = '\x00\x01\x02\xFF'::BLOB;
 
 query I
 SELECT octet_length(content) FROM read_blob('variable:blob_var');
 ----
-16
+4
 
 # To store actual binary, use base64 encoding or write via COPY
 statement ok

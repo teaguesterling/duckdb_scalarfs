@@ -11,5 +11,6 @@ test/python/__pycache__/
 __pathvar_*
 __mod_test*.csv
 __test_mod*.csv
+__decompress_test*
 aaa.csv
 zzz.csv

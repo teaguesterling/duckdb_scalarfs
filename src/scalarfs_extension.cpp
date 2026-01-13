@@ -4,6 +4,7 @@
 #include "data_uri_filesystem.hpp"
 #include "variable_filesystem.hpp"
 #include "pathvariable_filesystem.hpp"
+#include "decompress_filesystem.hpp"
 #include "variable_copy_function.hpp"
 #include "scalarfs_functions.hpp"
 #include "duckdb.hpp"
@@ -26,6 +27,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Register the path variable filesystem (handles pathvariable:)
 	fs.RegisterSubSystem(make_uniq<PathVariableFileSystem>());
+
+	// Register the decompress filesystem (handles decompress+gz:, decompress+zstd:)
+	fs.RegisterSubSystem(make_uniq<DecompressFileSystem>());
 
 	// Register the variable copy function (FORMAT variable)
 	VariableCopyFunction::Register(loader);

@@ -15,6 +15,7 @@ set(EXTENSION_SOURCES
     src/memory_file_handle.cpp
     src/variable_filesystem.cpp
     src/pathvariable_filesystem.cpp
+    src/decompress_filesystem.cpp
     src/variable_copy_function.cpp
     src/scalarfs_functions.cpp
 )

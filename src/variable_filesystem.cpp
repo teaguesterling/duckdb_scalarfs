@@ -114,7 +114,14 @@ unique_ptr<FileHandle> VariableFileSystem::OpenFile(const string &path, FileOpen
 		throw IOException("Variable '%s' is NULL", var_name);
 	}
 
-	string content = result.ToString();
+	// Handle BLOB specially - get raw bytes, not escaped string representation
+	string content;
+	if (result.type().id() == LogicalTypeId::BLOB) {
+		auto blob_data = StringValue::Get(result);
+		content = blob_data;
+	} else {
+		content = result.ToString();
+	}
 	return make_uniq<VariableReadHandle>(*this, path, std::move(content));
 }
 

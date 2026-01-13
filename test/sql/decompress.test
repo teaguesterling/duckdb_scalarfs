@@ -1,0 +1,99 @@
+# name: test/sql/decompress.test
+# description: Test decompress+gz: protocol for transparent gzip decompression
+# group: [sql]
+
+require scalarfs
+
+require json
+
+# =============================================================================
+# Basic gzip decompression from base64 data URI
+# =============================================================================
+
+# "Hello, World" gzipped and base64 encoded
+query I
+SELECT content FROM read_text('decompress+gz:data:;base64,H4sIAAAAAAAAA/NIzcnJ11EIzy/KSQEAxoZbJgwAAAA=');
+----
+Hello, World
+
+# CSV data gzipped: "a,b\n1,2\n3,4\n"
+query II
+SELECT * FROM read_csv('decompress+gz:data:;base64,H4sIAAAAAAAAA0vUSeIy1DHiMtYx4QIA5enWzgwAAAA=');
+----
+1	2
+3	4
+
+# =============================================================================
+# Decompress from variable (BLOB)
+# =============================================================================
+
+# Store gzipped content as BLOB in a variable and decompress
+statement ok
+SET VARIABLE gzipped_hello = from_base64('H4sIAAAAAAAAA/NIzcnJ11EIzy/KSQEAxoZbJgwAAAA=');
+
+query I
+SELECT content FROM read_text('decompress+gz:variable:gzipped_hello');
+----
+Hello, World
+
+# =============================================================================
+# Decompress JSON
+# =============================================================================
+
+# {"key": "value"} gzipped
+query I
+SELECT key FROM read_json('decompress+gz:data:;base64,H4sIAAAAAAAAA6tWyk6tVLJSUCpLzClNVaoFABtINTMQAAAA');
+----
+value
+
+# =============================================================================
+# Error cases
+# =============================================================================
+
+# Not gzip format - should error
+statement error
+SELECT * FROM read_text('decompress+gz:data+varchar:not gzip data');
+----
+not in gzip format
+
+# Write attempt should fail
+statement error
+COPY (SELECT 1 AS a) TO 'decompress+gz:/tmp/test.gz' (FORMAT csv);
+----
+read-only
+
+# =============================================================================
+# Protocol chaining with pathvariable
+# =============================================================================
+
+# Store a path to gzipped content in a variable
+statement ok
+SET VARIABLE gz_data_path = 'data:;base64,H4sIAAAAAAAAA/NIzcnJ11EIzy/KSQEAxoZbJgwAAAA=';
+
+query I
+SELECT content FROM read_text('decompress+gz:pathvariable:gz_data_path');
+----
+Hello, World
+
+# =============================================================================
+# Decompress local file (without .gz extension to avoid DuckDB auto-decompress)
+# =============================================================================
+
+# Create a gzipped file with non-.gz extension
+statement ok
+COPY (SELECT 'test,data' AS col) TO '__decompress_test.bin' (FORMAT csv, COMPRESSION gzip);
+
+query I
+SELECT col FROM read_csv('decompress+gz:__decompress_test.bin');
+----
+test,data
+
+# =============================================================================
+# decompress+zstd: not yet implemented
+# =============================================================================
+
+statement error
+SELECT * FROM read_text('decompress+zstd:data+varchar:test');
+----
+not yet implemented
+
