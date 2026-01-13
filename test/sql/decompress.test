@@ -89,11 +89,61 @@ SELECT col FROM read_csv('decompress+gz:__decompress_test.bin');
 test,data
 
 # =============================================================================
-# decompress+zstd: not yet implemented
+# Zstd decompression from base64 data URI
 # =============================================================================
 
-statement error
-SELECT * FROM read_text('decompress+zstd:data+varchar:test');
+# "Hello, World" zstd-compressed and base64 encoded
+query I
+SELECT content FROM read_text('decompress+zstd:data:;base64,KLUv/QRYYQAASGVsbG8sIFdvcmxkUcfT8g==');
 ----
-not yet implemented
+Hello, World
+
+# CSV data zstd-compressed: "a,b\n1,2\n3,4\n"
+query II
+SELECT * FROM read_csv('decompress+zstd:data:;base64,KLUv/QRYYQAAYSxiCjEsMgozLDQK4bPLLg==');
+----
+1	2
+3	4
+
+# JSON data zstd-compressed: {"key": "value"}
+query I
+SELECT key FROM read_json('decompress+zstd:data:;base64,KLUv/QRYgQAAeyJrZXkiOiAidmFsdWUifRY8/sA=');
+----
+value
+
+# =============================================================================
+# Zstd from variable (BLOB)
+# =============================================================================
+
+statement ok
+SET VARIABLE zstd_hello = from_base64('KLUv/QRYYQAASGVsbG8sIFdvcmxkUcfT8g==');
+
+query I
+SELECT content FROM read_text('decompress+zstd:variable:zstd_hello');
+----
+Hello, World
+
+# =============================================================================
+# Zstd local file (without .zst extension to avoid DuckDB auto-decompress)
+# =============================================================================
+
+require parquet
+
+statement ok
+COPY (SELECT 'zstd,test' AS col) TO '__decompress_test_zstd.bin' (FORMAT csv, COMPRESSION zstd);
+
+query I
+SELECT col FROM read_csv('decompress+zstd:__decompress_test_zstd.bin');
+----
+zstd,test
+
+# =============================================================================
+# Zstd error cases
+# =============================================================================
+
+# Not zstd format - should error
+statement error
+SELECT * FROM read_text('decompress+zstd:data+varchar:not zstd data');
+----
+not in zstd format
 

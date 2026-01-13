@@ -17,6 +17,7 @@ DuckDB's file functions (`read_csv`, `read_json`, `COPY TO`, etc.) expect file p
 | `data+varchar:` | Raw VARCHAR content as file | Read |
 | `data+blob:` | Escaped BLOB content as file | Read |
 | `decompress+gz:` | Gzip decompression wrapper | Read |
+| `decompress+zstd:` | Zstd decompression wrapper | Read |
 
 ## Quick Start
 
@@ -373,12 +374,12 @@ SELECT * FROM read_text('data+blob:line1\nline2\nline3');
 SELECT * FROM read_text('data+blob:tab\there\nnewline\nand hex: \x41\x42\x43');
 ```
 
-### `decompress+gz:` — Gzip Decompression Wrapper
+### `decompress+gz:` / `decompress+zstd:` — Decompression Wrappers
 
-Transparently decompress gzip content from any source. Wraps any path or protocol.
+Transparently decompress gzip or zstd content from any source. Wraps any path or protocol.
 
 ```sql
--- Decompress a local file (useful when read_blob doesn't auto-decompress)
+-- Decompress a local gzip file (useful when read_blob doesn't auto-decompress)
 SELECT * FROM read_blob('decompress+gz:/path/to/data.bin.gz');
 
 -- Decompress gzipped content stored in a variable
@@ -391,20 +392,22 @@ SELECT * FROM read_text('decompress+gz:data:;base64,H4sIAAAAAAAAA/NIzcnJ11EIzy/K
 -- Chain with pathvariable for dynamic paths
 SET VARIABLE gz_path = 's3://bucket/data.csv.gz';
 SELECT * FROM read_csv('decompress+gz:pathvariable:gz_path');
-```
 
-**Note:** `decompress+zstd:` is planned but not yet implemented.
+-- Zstd decompression works the same way
+SELECT * FROM read_blob('decompress+zstd:/path/to/data.bin.zst');
+SELECT * FROM read_csv('decompress+zstd:variable:zstd_compressed_csv');
+```
 
 **Comparison with zipfs `archive:` protocol:**
 
-| Feature | `decompress+gz:` (scalarfs) | `archive:` (zipfs) |
-|---------|----------------------------|-------------------|
-| Format | gzip streams | zip archives only |
+| Feature | `decompress+gz:`/`decompress+zstd:` (scalarfs) | `archive:` (zipfs) |
+|---------|-----------------------------------------------|-------------------|
+| Format | gzip/zstd streams | zip archives only |
 | Purpose | Decompress single stream | Access files within .zip |
-| Use case | `.gz` files, compressed variables | Multi-file zip archives |
+| Use case | `.gz`/`.zst` files, compressed variables | Multi-file zip archives |
 | Syntax | `decompress+gz:/path/file.gz` | `archive:///path/file.zip/entry.csv` |
 
-The zipfs `archive:` protocol extracts files from zip archives (e.g., `archive:///data.zip/file.csv`). It does **not** handle gzip files - use `decompress+gz:` for those.
+The zipfs `archive:` protocol extracts files from zip archives (e.g., `archive:///data.zip/file.csv`). It does **not** handle gzip or zstd files - use `decompress+gz:` or `decompress+zstd:` for those.
 
 ## Helper Functions
 

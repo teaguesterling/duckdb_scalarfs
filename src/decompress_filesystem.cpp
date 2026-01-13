@@ -5,6 +5,7 @@
 #include "duckdb/common/gzip_file_system.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "zstd.h"
 
 namespace duckdb {
 
@@ -54,8 +55,76 @@ string DecompressFileSystem::DecompressContent(const string &compressed, Decompr
 		}
 		return GZipFileSystem::UncompressGZIPString(compressed);
 	}
-	case DecompressFormat::ZSTD:
-		throw IOException("decompress+zstd: protocol is not yet implemented");
+	case DecompressFormat::ZSTD: {
+		if (compressed.empty()) {
+			return "";
+		}
+		// Check zstd magic number (0xFD2FB528 little-endian)
+		if (compressed.size() < 4) {
+			throw IOException("Content is not in zstd format");
+		}
+		uint32_t magic;
+		memcpy(&magic, compressed.data(), 4);
+		if (magic != 0xFD2FB528) {
+			throw IOException("Content is not in zstd format");
+		}
+
+		// Get decompressed size from frame header (if available)
+		unsigned long long decompressed_size =
+		    duckdb_zstd::ZSTD_getFrameContentSize(compressed.data(), compressed.size());
+
+		if (decompressed_size == ZSTD_CONTENTSIZE_ERROR) {
+			throw IOException("Invalid zstd frame header");
+		}
+
+		// If content size is known, use single-shot decompression
+		if (decompressed_size != ZSTD_CONTENTSIZE_UNKNOWN) {
+			string decompressed;
+			decompressed.resize(decompressed_size);
+
+			size_t result = duckdb_zstd::ZSTD_decompress((void *)decompressed.data(), decompressed.size(),
+			                                             compressed.data(), compressed.size());
+
+			if (duckdb_zstd::ZSTD_isError(result)) {
+				throw IOException("Zstd decompression failed: %s", duckdb_zstd::ZSTD_getErrorName(result));
+			}
+
+			return decompressed;
+		}
+
+		// Content size unknown - use streaming decompression
+		auto dstream = duckdb_zstd::ZSTD_createDStream();
+		if (!dstream) {
+			throw IOException("Failed to create zstd decompression stream");
+		}
+
+		size_t init_result = duckdb_zstd::ZSTD_initDStream(dstream);
+		if (duckdb_zstd::ZSTD_isError(init_result)) {
+			duckdb_zstd::ZSTD_freeDStream(dstream);
+			throw IOException("Failed to initialize zstd stream: %s", duckdb_zstd::ZSTD_getErrorName(init_result));
+		}
+
+		string decompressed;
+		size_t out_buf_size = duckdb_zstd::ZSTD_DStreamOutSize();
+		auto out_buf = make_unsafe_uniq_array<char>(out_buf_size);
+
+		duckdb_zstd::ZSTD_inBuffer input = {compressed.data(), compressed.size(), 0};
+
+		while (input.pos < input.size) {
+			duckdb_zstd::ZSTD_outBuffer output = {out_buf.get(), out_buf_size, 0};
+
+			size_t ret = duckdb_zstd::ZSTD_decompressStream(dstream, &output, &input);
+			if (duckdb_zstd::ZSTD_isError(ret)) {
+				duckdb_zstd::ZSTD_freeDStream(dstream);
+				throw IOException("Zstd streaming decompression failed: %s", duckdb_zstd::ZSTD_getErrorName(ret));
+			}
+
+			decompressed.append(out_buf.get(), output.pos);
+		}
+
+		duckdb_zstd::ZSTD_freeDStream(dstream);
+		return decompressed;
+	}
 	default:
 		throw IOException("Unknown decompression format");
 	}
