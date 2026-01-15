@@ -12,7 +12,7 @@ require scalarfs
 
 # Test COPY with default USE_TMP_FILE (should be true)
 statement ok
-SET VARIABLE tmpfile_out_path = '__pathvar_tmpfile_test.csv';
+SET VARIABLE tmpfile_out_path = '__scalarfs_test_pathvar_tmpfile_test.csv';
 
 statement ok
 CREATE TABLE t1 AS SELECT 'hello' as msg;
@@ -29,7 +29,7 @@ hello
 
 # Also verify via direct path
 query I
-SELECT * FROM read_csv('__pathvar_tmpfile_test.csv', columns={'msg': 'VARCHAR'}, header=false);
+SELECT * FROM read_csv('__scalarfs_test_pathvar_tmpfile_test.csv', columns={'msg': 'VARCHAR'}, header=false);
 ----
 hello
 
@@ -41,7 +41,7 @@ DROP TABLE t1;
 # =============================================================================
 
 statement ok
-SET VARIABLE tmpfile_overwrite_path = '__pathvar_tmpfile_overwrite.csv';
+SET VARIABLE tmpfile_overwrite_path = '__scalarfs_test_pathvar_tmpfile_overwrite.csv';
 
 # Create initial file (without temp file for simplicity)
 statement ok
@@ -72,7 +72,7 @@ DROP TABLE t2;
 # =============================================================================
 
 statement ok
-SET VARIABLE tmpfile_json_path = '__pathvar_tmpfile_test.json';
+SET VARIABLE tmpfile_json_path = '__scalarfs_test_pathvar_tmpfile_test.json';
 
 statement ok
 COPY (SELECT 'Alice' as name, 30 as age) TO 'pathvariable:tmpfile_json_path' (FORMAT json);
@@ -87,10 +87,10 @@ Alice	30
 # =============================================================================
 
 statement ok
-SET VARIABLE multi_path_1 = '__pathvar_multi_1.csv';
+SET VARIABLE multi_path_1 = '__scalarfs_test_pathvar_multi_1.csv';
 
 statement ok
-SET VARIABLE multi_path_2 = '__pathvar_multi_2.csv';
+SET VARIABLE multi_path_2 = '__scalarfs_test_pathvar_multi_2.csv';
 
 statement ok
 COPY (SELECT 1 as a) TO 'pathvariable:multi_path_1' (FORMAT csv, HEADER false);

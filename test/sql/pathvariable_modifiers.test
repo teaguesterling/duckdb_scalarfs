@@ -9,13 +9,13 @@ require scalarfs
 # =============================================================================
 
 statement ok
-COPY (SELECT 'mod1' as src, 1 as val) TO '__mod_test1.csv' (FORMAT csv, HEADER true);
+COPY (SELECT 'mod1' as src, 1 as val) TO '__scalarfs_test_mod_test1.csv' (FORMAT csv, HEADER true);
 
 statement ok
-COPY (SELECT 'mod2' as src, 2 as val) TO '__mod_test2.csv' (FORMAT csv, HEADER true);
+COPY (SELECT 'mod2' as src, 2 as val) TO '__scalarfs_test_mod_test2.csv' (FORMAT csv, HEADER true);
 
 statement ok
-COPY (SELECT 'mod3' as src, 3 as val) TO '__mod_test3.csv' (FORMAT csv, HEADER true);
+COPY (SELECT 'mod3' as src, 3 as val) TO '__scalarfs_test_mod_test3.csv' (FORMAT csv, HEADER true);
 
 # =============================================================================
 # no-glob modifier
@@ -23,7 +23,7 @@ COPY (SELECT 'mod3' as src, 3 as val) TO '__mod_test3.csv' (FORMAT csv, HEADER t
 
 # Without no-glob: glob pattern expands
 statement ok
-SET VARIABLE glob_path = '__mod_test*.csv';
+SET VARIABLE glob_path = '__scalarfs_test_mod_test*.csv';
 
 query I
 SELECT count(*) FROM glob('pathvariable:glob_path');
@@ -34,7 +34,7 @@ SELECT count(*) FROM glob('pathvariable:glob_path');
 query I
 SELECT file FROM glob('pathvariable:no-glob:glob_path');
 ----
-__mod_test*.csv
+__scalarfs_test_mod_test*.csv
 
 # =============================================================================
 # search modifier - returns first existing match
@@ -42,12 +42,12 @@ __mod_test*.csv
 
 # Search finds first existing file in original order
 statement ok
-SET VARIABLE search_paths = ['__nonexistent1.csv', '__nonexistent2.csv', '__mod_test2.csv', '__mod_test1.csv'];
+SET VARIABLE search_paths = ['__nonexistent1.csv', '__nonexistent2.csv', '__scalarfs_test_mod_test2.csv', '__scalarfs_test_mod_test1.csv'];
 
 query I
 SELECT file FROM glob('pathvariable:search:search_paths');
 ----
-__mod_test2.csv
+__scalarfs_test_mod_test2.csv
 
 # Search with all non-existent returns empty (causes error when reading)
 statement ok
@@ -63,13 +63,13 @@ SELECT count(*) FROM glob('pathvariable:search:all_missing');
 # =============================================================================
 
 statement ok
-SET VARIABLE mixed_paths = ['__nonexistent.csv', '__mod_test1.csv', '__also_missing.csv', '__mod_test2.csv'];
+SET VARIABLE mixed_paths = ['__nonexistent.csv', '__scalarfs_test_mod_test1.csv', '__also_missing.csv', '__scalarfs_test_mod_test2.csv'];
 
 query I
 SELECT file FROM glob('pathvariable:no-missing:mixed_paths') ORDER BY file;
 ----
-__mod_test1.csv
-__mod_test2.csv
+__scalarfs_test_mod_test1.csv
+__scalarfs_test_mod_test2.csv
 
 # All missing returns empty
 query I
@@ -144,17 +144,17 @@ statement ok
 SET VARIABLE test_roots = ['__nonexistent_root', '.'];
 
 query I
-SELECT file FROM glob('pathvariable:append:search:test_roots!/__mod_test1.csv');
+SELECT parse_path(file) FROM glob('pathvariable:append:search:test_roots!/__scalarfs_test_mod_test1.csv');
 ----
-./__mod_test1.csv
+[., __scalarfs_test_mod_test1.csv]
 
 # append + no-missing: construct paths and filter non-existent
 query I
-SELECT file FROM glob('pathvariable:append:no-missing:test_roots!/__mod_test*.csv') ORDER BY file;
+SELECT parse_path(file) FROM glob('pathvariable:append:no-missing:test_roots!/__scalarfs_test_mod_test*.csv') ORDER BY file;
 ----
-./__mod_test1.csv
-./__mod_test2.csv
-./__mod_test3.csv
+[., __scalarfs_test_mod_test1.csv]
+[., __scalarfs_test_mod_test2.csv]
+[., __scalarfs_test_mod_test3.csv]
 
 # no-glob + append: append without glob expansion
 statement ok
@@ -171,7 +171,7 @@ dir/*.csv
 
 # data+varchar: URLs are treated as existing
 statement ok
-SET VARIABLE virtual_paths = ['__nonexistent.csv', 'data+varchar:col,value', '__mod_test1.csv'];
+SET VARIABLE virtual_paths = ['__nonexistent.csv', 'data+varchar:col,value', '__scalarfs_test_mod_test1.csv'];
 
 query I
 SELECT file FROM glob('pathvariable:search:virtual_paths');
@@ -183,7 +183,7 @@ statement ok
 SET VARIABLE some_var = 'content';
 
 statement ok
-SET VARIABLE var_paths = ['__nonexistent.csv', 'variable:some_var', '__mod_test1.csv'];
+SET VARIABLE var_paths = ['__nonexistent.csv', 'variable:some_var', '__scalarfs_test_mod_test1.csv'];
 
 query I
 SELECT file FROM glob('pathvariable:search:var_paths');
@@ -219,7 +219,7 @@ SET VARIABLE blob_roots = ['__local_cache', '.'];
 
 # First root doesn't have the file, second does
 query II
-SELECT * FROM read_csv('pathvariable:append:search:blob_roots!/__mod_test1.csv');
+SELECT * FROM read_csv('pathvariable:append:search:blob_roots!/__scalarfs_test_mod_test1.csv');
 ----
 mod1	1
 
@@ -286,7 +286,7 @@ s3://bucket
 
 # Basic no-cache usage - should work same as without cache
 statement ok
-SET VARIABLE cache_test_path = '__mod_test1.csv';
+SET VARIABLE cache_test_path = '__scalarfs_test_mod_test1.csv';
 
 query II
 SELECT * FROM read_csv('pathvariable:cache_test_path');
@@ -304,7 +304,7 @@ statement ok
 SET VARIABLE cache_roots = ['.'];
 
 query I
-SELECT count(*) FROM glob('pathvariable:no-cache:append:cache_roots!/__mod_test*.csv');
+SELECT count(*) FROM glob('pathvariable:no-cache:append:cache_roots!/__scalarfs_test_mod_test*.csv');
 ----
 3
 
@@ -332,7 +332,7 @@ not found
 
 # Append without value - variable name includes the !
 statement ok
-SET VARIABLE append_no_val = '__mod_test1.csv';
+SET VARIABLE append_no_val = '__scalarfs_test_mod_test1.csv';
 
 # This should work - "append" is modifier, variable is "append_no_val" (no ! means no value)
 query I

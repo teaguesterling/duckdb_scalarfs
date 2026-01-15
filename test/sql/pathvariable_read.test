@@ -12,15 +12,15 @@ require scalarfs
 
 statement ok
 COPY (SELECT 'a,b' || chr(10) || '1,2' || chr(10) || '3,4' AS content)
-TO '__pathvar_test_data.csv' (FORMAT csv, HEADER false, QUOTE '');
+TO '__scalarfs_test_pathvar_test_data.csv' (FORMAT csv, HEADER false, QUOTE '');
 
 statement ok
 COPY (SELECT '{"name":"Alice","age":30}' AS content)
-TO '__pathvar_test_data.json' (FORMAT csv, HEADER false, QUOTE '');
+TO '__scalarfs_test_pathvar_test_data.json' (FORMAT csv, HEADER false, QUOTE '');
 
 statement ok
 COPY (SELECT 'Hello, World!' AS content)
-TO '__pathvar_test_data.txt' (FORMAT csv, HEADER false, QUOTE '');
+TO '__scalarfs_test_pathvar_test_data.txt' (FORMAT csv, HEADER false, QUOTE '');
 
 # =============================================================================
 # Basic pathvariable reads
@@ -28,7 +28,7 @@ TO '__pathvar_test_data.txt' (FORMAT csv, HEADER false, QUOTE '');
 
 # CSV file path in variable
 statement ok
-SET VARIABLE csv_path = '__pathvar_test_data.csv';
+SET VARIABLE csv_path = '__scalarfs_test_pathvar_test_data.csv';
 
 query II
 SELECT * FROM read_csv('pathvariable:csv_path');
@@ -38,7 +38,7 @@ SELECT * FROM read_csv('pathvariable:csv_path');
 
 # JSON file path in variable
 statement ok
-SET VARIABLE json_path = '__pathvar_test_data.json';
+SET VARIABLE json_path = '__scalarfs_test_pathvar_test_data.json';
 
 query II
 SELECT name, age FROM read_json('pathvariable:json_path');
@@ -47,7 +47,7 @@ Alice	30
 
 # Text file path in variable
 statement ok
-SET VARIABLE text_path = '__pathvar_test_data.txt';
+SET VARIABLE text_path = '__scalarfs_test_pathvar_test_data.txt';
 
 query I
 SELECT rtrim(content, chr(10)) FROM read_text('pathvariable:text_path');
@@ -61,15 +61,15 @@ Hello, World!
 # Create additional test files for list testing
 statement ok
 COPY (SELECT 'src,value' || chr(10) || 'list1,100' AS content)
-TO '__pathvar_list_file1.csv' (FORMAT csv, HEADER false, QUOTE '');
+TO '__scalarfs_test_pathvar_list_file1.csv' (FORMAT csv, HEADER false, QUOTE '');
 
 statement ok
 COPY (SELECT 'src,value' || chr(10) || 'list2,200' AS content)
-TO '__pathvar_list_file2.csv' (FORMAT csv, HEADER false, QUOTE '');
+TO '__scalarfs_test_pathvar_list_file2.csv' (FORMAT csv, HEADER false, QUOTE '');
 
 # Read multiple files via list variable
 statement ok
-SET VARIABLE file_list = ['__pathvar_list_file1.csv', '__pathvar_list_file2.csv'];
+SET VARIABLE file_list = ['__scalarfs_test_pathvar_list_file1.csv', '__scalarfs_test_pathvar_list_file2.csv'];
 
 query II
 SELECT * FROM read_csv('pathvariable:file_list', header=true) ORDER BY src;
@@ -88,7 +88,7 @@ No files found
 
 # Single-element list should work like scalar
 statement ok
-SET VARIABLE single_list = ['__pathvar_test_data.csv'];
+SET VARIABLE single_list = ['__scalarfs_test_pathvar_test_data.csv'];
 
 query I
 SELECT count(*) FROM read_csv('pathvariable:single_list');
@@ -97,7 +97,7 @@ SELECT count(*) FROM read_csv('pathvariable:single_list');
 
 # List with glob patterns inside paths
 statement ok
-SET VARIABLE glob_list = ['__pathvar_list_*.csv'];
+SET VARIABLE glob_list = ['__scalarfs_test_pathvar_list_*.csv'];
 
 query II
 SELECT * FROM read_csv('pathvariable:glob_list', header=true) ORDER BY src;
@@ -110,7 +110,7 @@ list2	200
 # =============================================================================
 
 statement ok
-SET VARIABLE my_data_path_01 = '__pathvar_test_data.csv';
+SET VARIABLE my_data_path_01 = '__scalarfs_test_pathvar_test_data.csv';
 
 query I
 SELECT count(*) FROM read_csv('pathvariable:my_data_path_01');
@@ -199,7 +199,7 @@ SELECT * FROM read_csv('pathvariable:nested_path');
 # =============================================================================
 
 statement ok
-SET VARIABLE reusable_path = '__pathvar_test_data.csv';
+SET VARIABLE reusable_path = '__scalarfs_test_pathvar_test_data.csv';
 
 query I
 SELECT count(*) FROM read_csv('pathvariable:reusable_path');
@@ -216,7 +216,7 @@ SELECT count(*) FROM read_csv('pathvariable:reusable_path');
 # =============================================================================
 
 statement ok
-SET VARIABLE mutable_path = '__pathvar_test_data.csv';
+SET VARIABLE mutable_path = '__scalarfs_test_pathvar_test_data.csv';
 
 query I
 SELECT count(*) FROM read_csv('pathvariable:mutable_path');
@@ -224,7 +224,7 @@ SELECT count(*) FROM read_csv('pathvariable:mutable_path');
 2
 
 statement ok
-SET VARIABLE mutable_path = '__pathvar_test_data.txt';
+SET VARIABLE mutable_path = '__scalarfs_test_pathvar_test_data.txt';
 
 query I
 SELECT rtrim(content, chr(10)) FROM read_text('pathvariable:mutable_path');

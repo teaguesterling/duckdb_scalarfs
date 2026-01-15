@@ -10,15 +10,15 @@ require scalarfs
 
 statement ok
 COPY (SELECT 'src,value' || chr(10) || 'adv1,100')
-TO '__pathvar_adv1.csv' (FORMAT csv, HEADER false, QUOTE '');
+TO '__scalarfs_test_pathvar_adv1.csv' (FORMAT csv, HEADER false, QUOTE '');
 
 statement ok
 COPY (SELECT 'src,value' || chr(10) || 'adv2,200')
-TO '__pathvar_adv2.csv' (FORMAT csv, HEADER false, QUOTE '');
+TO '__scalarfs_test_pathvar_adv2.csv' (FORMAT csv, HEADER false, QUOTE '');
 
 statement ok
 COPY (SELECT 'src,value' || chr(10) || 'adv3,300')
-TO '__pathvar_adv3.csv' (FORMAT csv, HEADER false, QUOTE '');
+TO '__scalarfs_test_pathvar_adv3.csv' (FORMAT csv, HEADER false, QUOTE '');
 
 # =============================================================================
 # glob() as path expansion preview
@@ -26,28 +26,28 @@ TO '__pathvar_adv3.csv' (FORMAT csv, HEADER false, QUOTE '');
 
 # glob() can be used to preview what paths pathvariable: will resolve to
 statement ok
-SET VARIABLE preview_paths = ['__pathvar_adv1.csv', '__pathvar_adv2.csv'];
+SET VARIABLE preview_paths = ['__scalarfs_test_pathvar_adv1.csv', '__scalarfs_test_pathvar_adv2.csv'];
 
 query I
 SELECT file FROM glob('pathvariable:preview_paths') ORDER BY file;
 ----
-__pathvar_adv1.csv
-__pathvar_adv2.csv
+__scalarfs_test_pathvar_adv1.csv
+__scalarfs_test_pathvar_adv2.csv
 
 # glob() expands glob patterns inside the list
 statement ok
-SET VARIABLE glob_preview = ['__pathvar_adv*.csv'];
+SET VARIABLE glob_preview = ['__scalarfs_test_pathvar_adv*.csv'];
 
 query I
 SELECT file FROM glob('pathvariable:glob_preview') ORDER BY file;
 ----
-__pathvar_adv1.csv
-__pathvar_adv2.csv
-__pathvar_adv3.csv
+__scalarfs_test_pathvar_adv1.csv
+__scalarfs_test_pathvar_adv2.csv
+__scalarfs_test_pathvar_adv3.csv
 
 # glob() with multiple glob patterns in list
 statement ok
-SET VARIABLE multi_glob = ['__pathvar_adv1.csv', '__pathvar_adv?.csv'];
+SET VARIABLE multi_glob = ['__scalarfs_test_pathvar_adv1.csv', '__scalarfs_test_pathvar_adv?.csv'];
 
 query I
 SELECT count(DISTINCT file) FROM glob('pathvariable:multi_glob');
@@ -71,9 +71,9 @@ SELECT count(*) FROM glob('pathvariable:empty_for_glob');
 # (URLs won't be readable without httpfs, but glob should handle them)
 statement ok
 SET VARIABLE mixed_local_remote = [
-  '__pathvar_adv1.csv',
+  '__scalarfs_test_pathvar_adv1.csv',
   'https://example.com/data.csv',
-  '__pathvar_adv2.csv',
+  '__scalarfs_test_pathvar_adv2.csv',
   's3://bucket/file.csv'
 ];
 
@@ -81,8 +81,8 @@ SET VARIABLE mixed_local_remote = [
 query I
 SELECT file FROM glob('pathvariable:mixed_local_remote') ORDER BY file;
 ----
-__pathvar_adv1.csv
-__pathvar_adv2.csv
+__scalarfs_test_pathvar_adv1.csv
+__scalarfs_test_pathvar_adv2.csv
 https://example.com/data.csv
 s3://bucket/file.csv
 
@@ -96,9 +96,9 @@ CREATE OR REPLACE TABLE file_registry(path VARCHAR, active BOOLEAN);
 
 statement ok
 INSERT INTO file_registry VALUES
-  ('__pathvar_adv1.csv', true),
-  ('__pathvar_adv2.csv', true),
-  ('__pathvar_adv3.csv', false);
+  ('__scalarfs_test_pathvar_adv1.csv', true),
+  ('__scalarfs_test_pathvar_adv2.csv', true),
+  ('__scalarfs_test_pathvar_adv3.csv', false);
 
 # Store active paths using FORMAT variable
 statement ok
@@ -124,8 +124,8 @@ src	value
 query I
 SELECT file FROM glob('pathvariable:active_paths') ORDER BY file;
 ----
-__pathvar_adv1.csv
-__pathvar_adv2.csv
+__scalarfs_test_pathvar_adv1.csv
+__scalarfs_test_pathvar_adv2.csv
 
 # =============================================================================
 # FORMAT variable LIST scalar mode for paths
@@ -144,18 +144,18 @@ VARCHAR[]
 query I
 SELECT file FROM glob('pathvariable:scalar_paths') ORDER BY file;
 ----
-__pathvar_adv1.csv
-__pathvar_adv2.csv
+__scalarfs_test_pathvar_adv1.csv
+__scalarfs_test_pathvar_adv2.csv
 
 # =============================================================================
 # Glob on variable names with list variables
 # =============================================================================
 
 statement ok
-SET VARIABLE input_batch_a = ['__pathvar_adv1.csv'];
+SET VARIABLE input_batch_a = ['__scalarfs_test_pathvar_adv1.csv'];
 
 statement ok
-SET VARIABLE input_batch_b = ['__pathvar_adv2.csv', '__pathvar_adv3.csv'];
+SET VARIABLE input_batch_b = ['__scalarfs_test_pathvar_adv2.csv', '__scalarfs_test_pathvar_adv3.csv'];
 
 # Glob matches variable names, each containing a list
 query II

@@ -12,7 +12,7 @@ require scalarfs
 
 # Write CSV to path stored in variable
 statement ok
-SET VARIABLE out_csv_path = '__pathvar_write_test.csv';
+SET VARIABLE out_csv_path = '__scalarfs_test_pathvar_write_test.csv';
 
 statement ok
 CREATE TABLE t1 AS SELECT 1 as a, 2 as b UNION ALL SELECT 3, 4;
@@ -29,7 +29,7 @@ SELECT * FROM read_csv('pathvariable:out_csv_path');
 
 # Also verify we can read it directly (same path)
 query II
-SELECT * FROM read_csv('__pathvar_write_test.csv');
+SELECT * FROM read_csv('__scalarfs_test_pathvar_write_test.csv');
 ----
 1	2
 3	4
@@ -42,7 +42,7 @@ DROP TABLE t1;
 # =============================================================================
 
 statement ok
-SET VARIABLE out_json_path = '__pathvar_write_test.json';
+SET VARIABLE out_json_path = '__scalarfs_test_pathvar_write_test.json';
 
 statement ok
 CREATE TABLE t2 AS SELECT 'Alice' as name, 30 as age UNION ALL SELECT 'Bob', 25;
@@ -66,13 +66,13 @@ DROP TABLE t2;
 # Create initial file
 statement ok
 COPY (SELECT 10 as x, 20 as y UNION ALL SELECT 30, 40)
-TO '__pathvar_roundtrip_input.csv' (FORMAT csv, HEADER true);
+TO '__scalarfs_test_pathvar_roundtrip_input.csv' (FORMAT csv, HEADER true);
 
 statement ok
-SET VARIABLE input_path = '__pathvar_roundtrip_input.csv';
+SET VARIABLE input_path = '__scalarfs_test_pathvar_roundtrip_input.csv';
 
 statement ok
-SET VARIABLE output_path = '__pathvar_roundtrip_output.csv';
+SET VARIABLE output_path = '__scalarfs_test_pathvar_roundtrip_output.csv';
 
 # Read from path variable, transform, write to another path variable
 statement ok
@@ -95,7 +95,7 @@ DROP TABLE rt;
 # =============================================================================
 
 statement ok
-SET VARIABLE overwrite_path = '__pathvar_overwrite_test.csv';
+SET VARIABLE overwrite_path = '__scalarfs_test_pathvar_overwrite_test.csv';
 
 # Create initial file
 statement ok

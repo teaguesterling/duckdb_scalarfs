@@ -81,10 +81,10 @@ Hello, World
 
 # Create a gzipped file with non-.gz extension
 statement ok
-COPY (SELECT 'test,data' AS col) TO '__decompress_test.bin' (FORMAT csv, COMPRESSION gzip);
+COPY (SELECT 'test,data' AS col) TO '__scalarfs_test_decompress_test.bin' (FORMAT csv, COMPRESSION gzip);
 
 query I
-SELECT col FROM read_csv('decompress+gz:__decompress_test.bin');
+SELECT col FROM read_csv('decompress+gz:__scalarfs_test_decompress_test.bin');
 ----
 test,data
 
@@ -130,10 +130,10 @@ Hello, World
 require parquet
 
 statement ok
-COPY (SELECT 'zstd,test' AS col) TO '__decompress_test_zstd.bin' (FORMAT csv, COMPRESSION zstd);
+COPY (SELECT 'zstd,test' AS col) TO '__scalarfs_test_decompress_test_zstd.bin' (FORMAT csv, COMPRESSION zstd);
 
 query I
-SELECT col FROM read_csv('decompress+zstd:__decompress_test_zstd.bin');
+SELECT col FROM read_csv('decompress+zstd:__scalarfs_test_decompress_test_zstd.bin');
 ----
 zstd,test
 

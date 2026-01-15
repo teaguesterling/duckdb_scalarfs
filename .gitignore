@@ -8,9 +8,4 @@ test/python/__pycache__/
 .Rhistory
 
 # Generated test files
-__pathvar_*
-__mod_test*.csv
-__test_mod*.csv
-__decompress_test*
-aaa.csv
-zzz.csv
+__scalarfs_test_*

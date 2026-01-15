@@ -152,17 +152,17 @@ SELECT getvariable('empty_val');
 
 # Create test files
 statement ok
-COPY (SELECT 'x,y' || chr(10) || '1,2') TO '__pathvar_format_test1.csv' (FORMAT csv, HEADER false, QUOTE '');
+COPY (SELECT 'x,y' || chr(10) || '1,2') TO '__scalarfs_test_pathvar_format_test1.csv' (FORMAT csv, HEADER false, QUOTE '');
 
 statement ok
-COPY (SELECT 'x,y' || chr(10) || '3,4') TO '__pathvar_format_test2.csv' (FORMAT csv, HEADER false, QUOTE '');
+COPY (SELECT 'x,y' || chr(10) || '3,4') TO '__scalarfs_test_pathvar_format_test2.csv' (FORMAT csv, HEADER false, QUOTE '');
 
 # Store paths from query
 statement ok
 CREATE TABLE test_files(path VARCHAR);
 
 statement ok
-INSERT INTO test_files VALUES ('__pathvar_format_test1.csv'), ('__pathvar_format_test2.csv');
+INSERT INTO test_files VALUES ('__scalarfs_test_pathvar_format_test1.csv'), ('__scalarfs_test_pathvar_format_test2.csv');
 
 statement ok
 COPY (SELECT path FROM test_files) TO 'variable:file_paths' (FORMAT variable);
