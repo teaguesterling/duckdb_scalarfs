@@ -131,7 +131,7 @@ string DecompressFileSystem::DecompressContent(const string &compressed, Decompr
 }
 
 unique_ptr<FileHandle> DecompressFileSystem::OpenFile(const string &path, FileOpenFlags flags,
-                                                       optional_ptr<FileOpener> opener) {
+                                                      optional_ptr<FileOpener> opener) {
 	if (flags.OpenForWriting()) {
 		throw IOException("decompress protocols are read-only");
 	}

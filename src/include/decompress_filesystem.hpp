@@ -26,10 +26,7 @@ namespace duckdb {
 // on read. Write operations are not supported.
 //
 
-enum class DecompressFormat {
-	GZIP,
-	ZSTD
-};
+enum class DecompressFormat { GZIP, ZSTD };
 
 class DecompressFileSystem : public FileSystem {
 public:

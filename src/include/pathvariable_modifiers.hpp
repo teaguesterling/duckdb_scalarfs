@@ -27,14 +27,14 @@ namespace duckdb {
 // Modifier flags (can be combined)
 enum class PathVariableModifierFlag : uint8_t {
 	NONE = 0,
-	NO_GLOB = 1 << 0,           // Disable glob expansion in paths
-	SEARCH = 1 << 1,            // Return only first existing match
-	IGNORE_MISSING = 1 << 2,    // Skip non-existent files
-	APPEND = 1 << 3,            // Append value to each path
-	PREPEND = 1 << 4,           // Prepend value to each path
-	PASSTHRU_SCALARFS = 1 << 5, // Don't modify scalarfs protocol paths (data:, variable:, etc.)
+	NO_GLOB = 1 << 0,              // Disable glob expansion in paths
+	SEARCH = 1 << 1,               // Return only first existing match
+	IGNORE_MISSING = 1 << 2,       // Skip non-existent files
+	APPEND = 1 << 3,               // Append value to each path
+	PREPEND = 1 << 4,              // Prepend value to each path
+	PASSTHRU_SCALARFS = 1 << 5,    // Don't modify scalarfs protocol paths (data:, variable:, etc.)
 	PASSTHRU_EXPLICIT_FS = 1 << 6, // Don't modify paths with explicit protocols (://)
-	NO_CACHE = 1 << 7           // Disable caching of path resolution
+	NO_CACHE = 1 << 7              // Disable caching of path resolution
 };
 
 // Enable bitwise operations on modifier flags
