@@ -254,7 +254,7 @@ string DataURIFileSystem::DecodeBlobEscapes(const string &input) {
 			long val = strtol(hex, &end, 16);
 			if (end != hex + 2) {
 				throw IOException("Invalid \\x escape at position %llu: '%s' is not valid hex", (unsigned long long)i,
-				                  hex);
+				                  string(hex));
 			}
 			result += static_cast<char>(val);
 			i += 3;

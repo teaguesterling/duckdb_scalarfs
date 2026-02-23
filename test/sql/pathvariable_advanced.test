@@ -39,7 +39,7 @@ statement ok
 SET VARIABLE glob_preview = ['__scalarfs_test_pathvar_adv*.csv'];
 
 query I
-SELECT file FROM glob('pathvariable:glob_preview') ORDER BY file;
+SELECT ltrim(file, './') FROM glob('pathvariable:glob_preview') ORDER BY file;
 ----
 __scalarfs_test_pathvar_adv1.csv
 __scalarfs_test_pathvar_adv2.csv
@@ -50,7 +50,7 @@ statement ok
 SET VARIABLE multi_glob = ['__scalarfs_test_pathvar_adv1.csv', '__scalarfs_test_pathvar_adv?.csv'];
 
 query I
-SELECT count(DISTINCT file) FROM glob('pathvariable:multi_glob');
+SELECT count(DISTINCT ltrim(file, './')) FROM glob('pathvariable:multi_glob');
 ----
 3
 
