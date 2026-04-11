@@ -64,13 +64,8 @@ string PathVariableFileSystem::ComputeTempPath(const string &target_path) {
 	return dir + "tmp_" + filename;
 }
 
-string PathVariableFileSystem::GetPathFromVariable(const string &var_name, optional_ptr<FileOpener> opener) {
-	auto context = FileOpener::TryGetClientContext(opener);
-	if (!context) {
-		throw IOException("Cannot access variables without client context");
-	}
-
-	auto &config = ClientConfig::GetConfig(*context);
+string PathVariableFileSystem::GetPathFromVariable(ClientContext &context, const string &var_name) {
+	auto &config = ClientConfig::GetConfig(context);
 	Value result;
 	if (!config.GetUserVariable(var_name, result)) {
 		throw IOException("Variable '%s' not found", var_name);
@@ -87,8 +82,9 @@ string PathVariableFileSystem::GetPathFromVariable(const string &var_name, optio
 		if (child_type.id() == LogicalTypeId::VARCHAR || child_type.id() == LogicalTypeId::BLOB) {
 			// Valid list type - supported for reading via Glob, but not for single-file operations
 			throw IOException("Variable '%s' is a list type (%s). List variables are supported for reading "
-			                  "(e.g., read_csv, read_json), but not for single-file write operations. "
-			                  "Use a scalar VARCHAR or BLOB variable for writes.",
+			                  "(e.g., read_csv, read_json) and resolve to multiple paths, so they cannot be "
+			                  "used where a single path is required (writes, ATTACH). "
+			                  "Use a scalar VARCHAR or BLOB variable instead.",
 			                  var_name, type.ToString());
 		} else {
 			// Invalid list child type
@@ -102,6 +98,14 @@ string PathVariableFileSystem::GetPathFromVariable(const string &var_name, optio
 	}
 
 	return result.ToString();
+}
+
+string PathVariableFileSystem::GetPathFromVariable(const string &var_name, optional_ptr<FileOpener> opener) {
+	auto context = FileOpener::TryGetClientContext(opener);
+	if (!context) {
+		throw IOException("Cannot access variables without client context");
+	}
+	return GetPathFromVariable(*context, var_name);
 }
 
 bool PathVariableFileSystem::IsListVariable(const string &var_name, optional_ptr<FileOpener> opener) {

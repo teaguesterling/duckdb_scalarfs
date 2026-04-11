@@ -1,0 +1,160 @@
+# name: test/sql/pathvariable_attach.test
+# description: Test ATTACH with pathvariable: protocol (StorageExtension)
+# group: [sql]
+
+require scalarfs
+
+# =============================================================================
+# Setup: create a small duckdb database file we can attach to.
+# Use CREATE OR REPLACE so re-runs on a persisted db file are clean.
+# =============================================================================
+
+statement ok
+ATTACH '__scalarfs_test_pathvar_attach.db' AS seed;
+
+statement ok
+CREATE OR REPLACE TABLE seed.t AS SELECT 42 AS x, 'hello' AS y;
+
+statement ok
+DETACH seed;
+
+# =============================================================================
+# Basic: ATTACH via variable
+# =============================================================================
+
+statement ok
+SET VARIABLE db_path = '__scalarfs_test_pathvar_attach.db';
+
+statement ok
+ATTACH 'pathvariable:db_path' AS db;
+
+query IT
+SELECT x, y FROM db.t;
+----
+42	hello
+
+statement ok
+DETACH db;
+
+# =============================================================================
+# READ_ONLY attach
+# =============================================================================
+
+statement ok
+ATTACH 'pathvariable:db_path' AS db_ro (READ_ONLY);
+
+query IT
+SELECT x, y FROM db_ro.t;
+----
+42	hello
+
+# Writes should fail in read-only mode
+statement error
+INSERT INTO db_ro.t VALUES (1, 'x');
+----
+read-only
+
+statement ok
+DETACH db_ro;
+
+# =============================================================================
+# Round-trip: write through the attached database, detach, re-attach, read
+# =============================================================================
+
+statement ok
+ATTACH 'pathvariable:db_path' AS db;
+
+statement ok
+INSERT INTO db.t VALUES (99, 'world');
+
+statement ok
+DETACH db;
+
+statement ok
+ATTACH 'pathvariable:db_path' AS db;
+
+query IT rowsort
+SELECT x, y FROM db.t;
+----
+42	hello
+99	world
+
+statement ok
+DETACH db;
+
+# =============================================================================
+# Variable rebinding: changing the variable and attaching again picks up the new path
+# =============================================================================
+
+statement ok
+ATTACH '__scalarfs_test_pathvar_attach2.db' AS seed2;
+
+statement ok
+CREATE OR REPLACE TABLE seed2.other AS SELECT 'second' AS tag;
+
+statement ok
+DETACH seed2;
+
+statement ok
+SET VARIABLE db_path = '__scalarfs_test_pathvar_attach2.db';
+
+statement ok
+ATTACH 'pathvariable:db_path' AS db2;
+
+query T
+SELECT tag FROM db2.other;
+----
+second
+
+statement ok
+DETACH db2;
+
+# =============================================================================
+# Error cases
+# =============================================================================
+
+# Missing variable
+statement error
+ATTACH 'pathvariable:this_variable_does_not_exist' AS xdb;
+----
+not found
+
+# NULL variable
+statement ok
+SET VARIABLE null_db_path = NULL;
+
+statement error
+ATTACH 'pathvariable:null_db_path' AS xdb;
+----
+NULL
+
+# Non-string variable type
+statement ok
+SET VARIABLE int_db_path = 123;
+
+statement error
+ATTACH 'pathvariable:int_db_path' AS xdb;
+----
+must be VARCHAR or BLOB
+
+# List variable is rejected for ATTACH (single-path operation)
+statement ok
+SET VARIABLE list_db_path = ['__scalarfs_test_pathvar_attach.db', '__scalarfs_test_pathvar_attach2.db'];
+
+statement error
+ATTACH 'pathvariable:list_db_path' AS xdb;
+----
+list type
+
+# Modifiers are not supported for ATTACH
+statement error
+ATTACH 'pathvariable:search:db_path' AS xdb;
+----
+does not support modifiers
+
+# =============================================================================
+# Cleanup
+# =============================================================================
+
+statement ok
+SET VARIABLE db_path = '__scalarfs_test_pathvar_attach.db';

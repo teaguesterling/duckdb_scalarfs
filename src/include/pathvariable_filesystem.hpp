@@ -45,6 +45,12 @@ public:
 
 	vector<OpenFileInfo> Glob(const string &path, FileOpener *opener) override;
 
+	// Resolve a variable name to a single file path using a ClientContext directly.
+	// Used by the pathvariable StorageExtension, where ATTACH runs in a ClientContext
+	// but the downstream file opener has no client context. Throws if the variable is
+	// missing, NULL, a list, or not VARCHAR/BLOB.
+	static string GetPathFromVariable(ClientContext &context, const string &var_name);
+
 	// File operations - all delegate to parent filesystem via the handle
 	void Read(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override;
 	int64_t Read(FileHandle &handle, void *buffer, int64_t nr_bytes) override;

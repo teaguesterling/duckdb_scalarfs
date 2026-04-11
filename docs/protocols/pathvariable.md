@@ -200,6 +200,53 @@ COPY my_table TO 'pathvariable:out' (FORMAT csv);
 COPY my_table TO 'pathvariable:out' (FORMAT csv, USE_TMP_FILE false);
 ```
 
+## Attaching Databases
+
+Use `ATTACH` to open a DuckDB database file whose path is stored in a variable:
+
+```sql
+SET VARIABLE db_path = '/data/warehouse.duckdb';
+
+ATTACH 'pathvariable:db_path' AS wh;
+
+SELECT * FROM wh.sales LIMIT 10;
+```
+
+This works in read-write (default) and read-only mode:
+
+```sql
+ATTACH 'pathvariable:db_path' AS wh (READ_ONLY);
+```
+
+### How it works
+
+`ATTACH` is special — DuckDB's ATTACH path parser treats a `prefix:` as a
+database-type hint, and the database file is later opened through a code path
+that has no access to session variables. To make `pathvariable:` work with
+`ATTACH`, scalarfs registers a storage extension named `pathvariable`. Its
+attach callback runs with a `ClientContext`, resolves the variable, rewrites
+the attach target to the concrete file path, and delegates to the standard
+DuckDB storage path. From there, everything behaves like a regular
+`ATTACH '<file>'`.
+
+### Limitations
+
+- The variable must be a scalar `VARCHAR` or `BLOB` — list variables, which
+  normally expand to multiple paths, are rejected because `ATTACH` opens a
+  single database.
+- Modifier syntax (`search`, `no-missing`, `append`, `prepend`, ...) is not
+  supported for `ATTACH`. These modifiers are designed for read-side glob
+  expansion and do not produce a single concrete path. If you need multi-root
+  fallback, resolve the path yourself first and assign it to a scalar variable
+  before `ATTACH`.
+- The underlying file is opened through the standard DuckDB storage layer, so
+  it must be a DuckDB-format database file. Other `ATTACH`-capable storage
+  engines (sqlite, postgres, etc.) are not currently reachable via
+  `pathvariable:` — attach those directly.
+- Duplicate-attach detection is not performed for paths resolved through
+  `pathvariable:`. Attaching the same underlying file twice (via different
+  variables or via `pathvariable:` and a direct path) is not prevented.
+
 ## List Variable Support
 
 Store multiple paths in a `VARCHAR[]` list variable to read them all at once:
@@ -354,15 +401,21 @@ SELECT * FROM read_text('pathvariable:int_list');
 -- Error: Variable 'int_list' is a list but child type must be VARCHAR or BLOB, got INTEGER[]
 ```
 
-### List Variable for Writes
+### List Variable Where a Single Path Is Required
 
-List variables cannot be used for write operations:
+List variables cannot be used where a single concrete path is needed — that
+includes write operations and `ATTACH`:
 
 ```sql
 SET VARIABLE paths = ['/data/out1.csv', '/data/out2.csv'];
+
 COPY my_table TO 'pathvariable:paths' (FORMAT csv);
--- Error: Variable 'paths' is a list type (VARCHAR[]). List variables are supported for reading,
---        but not for single-file write operations.
+-- Error: Variable 'paths' is a list type (VARCHAR[]). List variables are
+--        supported for reading and resolve to multiple paths, so they cannot
+--        be used where a single path is required (writes, ATTACH).
+
+ATTACH 'pathvariable:paths' AS db;
+-- Same error.
 ```
 
 ### File Not Found

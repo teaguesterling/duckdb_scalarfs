@@ -4,13 +4,16 @@
 #include "data_uri_filesystem.hpp"
 #include "variable_filesystem.hpp"
 #include "pathvariable_filesystem.hpp"
+#include "pathvariable_storage_extension.hpp"
 #include "decompress_filesystem.hpp"
 #include "variable_copy_function.hpp"
 #include "scalarfs_functions.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/file_system.hpp"
+#include "duckdb/main/config.hpp"
 #include "duckdb/main/database.hpp"
+#include "duckdb/storage/storage_extension.hpp"
 
 namespace duckdb {
 
@@ -27,6 +30,13 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Register the path variable filesystem (handles pathvariable:)
 	fs.RegisterSubSystem(make_uniq<PathVariableFileSystem>());
+
+	// Register the `pathvariable` storage extension so ATTACH 'pathvariable:var' works.
+	// (The filesystem subsystem alone is not enough because DuckDB's ATTACH path parser
+	// treats `prefix:` as a database-type hint and the db-level file opener has no
+	// client context to resolve variables from.)
+	auto &config = DBConfig::GetConfig(db);
+	StorageExtension::Register(config, "pathvariable", PathVariableStorageExtension::Create());
 
 	// Register the decompress filesystem (handles decompress+gz:, decompress+zstd:)
 	fs.RegisterSubSystem(make_uniq<DecompressFileSystem>());
