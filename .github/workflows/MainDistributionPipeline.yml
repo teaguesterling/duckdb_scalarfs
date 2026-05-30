@@ -22,17 +22,21 @@ jobs:
 
   duckdb-stable-build:
     name: Build extension binaries
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4.4
+    # Bumped v1.4.4 → v1.5.3 (current duckdb stable). v1.4.x and v1.5.x are
+    # API-identical for the surfaces this extension uses (verified via grep:
+    # no ExecuteWithNulls / SetCardinality / aliased-SetValue / FlatVector
+    # GetData<T> writes), so no source changes are needed alongside the bump.
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5.3
     with:
-      duckdb_version: v1.4.4
-      ci_tools_version: v1.4.4
+      duckdb_version: v1.5.3
+      ci_tools_version: v1.5.3
       extension_name: scalarfs
 
   code-quality-check:
     name: Code Quality Check
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v1.4.4
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v1.5.3
     with:
-      duckdb_version: v1.4.4
-      ci_tools_version: v1.4.4
+      duckdb_version: v1.5.3
+      ci_tools_version: v1.5.3
       extension_name: scalarfs
       format_checks: 'format;tidy'
