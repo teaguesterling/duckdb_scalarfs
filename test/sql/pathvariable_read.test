@@ -140,10 +140,10 @@ NULL
 statement ok
 SET VARIABLE bad_path = '/nonexistent/path/to/file.txt';
 
+# Error text varies by filesystem backend (native: "Cannot open file";
+# wasm/emscripten: "ENOENT ..."), so assert only that it errors, not the message.
 statement error
 SELECT * FROM read_text('pathvariable:bad_path');
-----
-Cannot open file
 
 # =============================================================================
 # Type validation: non-VARCHAR/BLOB types should fail
