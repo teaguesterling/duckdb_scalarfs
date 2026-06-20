@@ -140,10 +140,14 @@ NULL
 statement ok
 SET VARIABLE bad_path = '/nonexistent/path/to/file.txt';
 
-# Error text varies by filesystem backend (native: "Cannot open file";
-# wasm/emscripten: "ENOENT ..."), so assert only that it errors, not the message.
+# Backend-specific error prefix (native "Cannot open file ...", wasm "ENOENT ..."),
+# but both contain the errno string "no such file or directory" -- match that
+# common substring. duckdb's sqllogictest requires statement error to carry an
+# expected message, so we keep one.
 statement error
 SELECT * FROM read_text('pathvariable:bad_path');
+----
+such file or directory
 
 # =============================================================================
 # Type validation: non-VARCHAR/BLOB types should fail
