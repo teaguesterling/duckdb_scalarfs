@@ -143,7 +143,8 @@ Value VariableCopyFunction::ConvertToValue(ColumnDataCollection &results, const 
 			// Empty list of structs
 			child_list_t<LogicalType> struct_children;
 			for (idx_t i = 0; i < col_count; i++) {
-				struct_children.push_back(make_pair(StructChildKey(bind_data.column_names[i]), bind_data.column_types[i]));
+				struct_children.push_back(
+				    make_pair(StructChildKey(bind_data.column_names[i]), bind_data.column_types[i]));
 			}
 			auto struct_type = LogicalType::STRUCT(std::move(struct_children));
 			return Value::LIST(struct_type, vector<Value>());
@@ -213,7 +214,8 @@ Value VariableCopyFunction::ConvertToValue(ColumnDataCollection &results, const 
 		{
 			child_list_t<LogicalType> struct_children;
 			for (idx_t i = 0; i < col_count; i++) {
-				struct_children.push_back(make_pair(StructChildKey(bind_data.column_names[i]), bind_data.column_types[i]));
+				struct_children.push_back(
+				    make_pair(StructChildKey(bind_data.column_names[i]), bind_data.column_types[i]));
 			}
 			auto struct_type = LogicalType::STRUCT(struct_children);
 
@@ -221,7 +223,8 @@ Value VariableCopyFunction::ConvertToValue(ColumnDataCollection &results, const 
 			for (idx_t row_idx = 0; row_idx < row_count; row_idx++) {
 				child_list_t<Value> struct_values;
 				for (idx_t col_idx = 0; col_idx < col_count; col_idx++) {
-					struct_values.push_back(make_pair(StructChildKey(bind_data.column_names[col_idx]), all_values[col_idx][row_idx]));
+					struct_values.push_back(
+					    make_pair(StructChildKey(bind_data.column_names[col_idx]), all_values[col_idx][row_idx]));
 				}
 				row_structs.push_back(Value::STRUCT(std::move(struct_values)));
 			}
@@ -248,7 +251,8 @@ Value VariableCopyFunction::ConvertToValue(ColumnDataCollection &results, const 
 			// N rows, N cols -> list of structs
 			child_list_t<LogicalType> struct_children;
 			for (idx_t i = 0; i < col_count; i++) {
-				struct_children.push_back(make_pair(StructChildKey(bind_data.column_names[i]), bind_data.column_types[i]));
+				struct_children.push_back(
+				    make_pair(StructChildKey(bind_data.column_names[i]), bind_data.column_types[i]));
 			}
 			auto struct_type = LogicalType::STRUCT(struct_children);
 
@@ -256,7 +260,8 @@ Value VariableCopyFunction::ConvertToValue(ColumnDataCollection &results, const 
 			for (idx_t row_idx = 0; row_idx < row_count; row_idx++) {
 				child_list_t<Value> struct_values;
 				for (idx_t col_idx = 0; col_idx < col_count; col_idx++) {
-					struct_values.push_back(make_pair(StructChildKey(bind_data.column_names[col_idx]), all_values[col_idx][row_idx]));
+					struct_values.push_back(
+					    make_pair(StructChildKey(bind_data.column_names[col_idx]), all_values[col_idx][row_idx]));
 				}
 				row_structs.push_back(Value::STRUCT(std::move(struct_values)));
 			}
