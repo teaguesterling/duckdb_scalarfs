@@ -28,10 +28,9 @@ static unique_ptr<Catalog> PathVariableStorageAttach(optional_ptr<StorageExtensi
 	// are read-side glob-expansion features that do not make sense here. Reject them with
 	// a clear error instead of silently ignoring them.
 	if (parsed.flags != PathVariableModifierFlag::NONE || parsed.is_temp) {
-		throw BinderException(
-		    "ATTACH 'pathvariable:...' does not support modifiers or temp paths; got '%s'. "
-		    "Use a scalar VARCHAR variable holding the database file path.",
-		    info.path);
+		throw BinderException("ATTACH 'pathvariable:...' does not support modifiers or temp paths; got '%s'. "
+		                      "Use a scalar VARCHAR variable holding the database file path.",
+		                      info.path);
 	}
 
 	// Resolve the variable to a concrete path. Throws on missing / NULL / wrong type.
@@ -47,8 +46,9 @@ static unique_ptr<Catalog> PathVariableStorageAttach(optional_ptr<StorageExtensi
 	return make_uniq<DuckCatalog>(db);
 }
 
-static unique_ptr<TransactionManager> PathVariableStorageTransactionManager(
-    optional_ptr<StorageExtensionInfo> storage_info, AttachedDatabase &db, Catalog &catalog) {
+static unique_ptr<TransactionManager>
+PathVariableStorageTransactionManager(optional_ptr<StorageExtensionInfo> storage_info, AttachedDatabase &db,
+                                      Catalog &catalog) {
 	return make_uniq<DuckTransactionManager>(db);
 }
 

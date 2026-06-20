@@ -394,7 +394,12 @@ vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener
 	} else {
 		// Level 1: Glob on variable names
 		for (const auto &entry : config.user_variables) {
+#if __has_include("duckdb/common/identifier.hpp")
+			// duckdb main keys ClientConfig::user_variables by Identifier, not string.
+			const string &var_name = entry.first.GetIdentifierName();
+#else
 			const string &var_name = entry.first;
+#endif
 			const Value &var_value = entry.second;
 
 			if (duckdb::Glob(var_name.c_str(), var_name.size(), pattern.c_str(), pattern.size())) {
