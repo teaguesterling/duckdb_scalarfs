@@ -183,6 +183,16 @@ Treat a variable's content as a file path, then read/write through the underlyin
 - `variable:X` — Variable content **IS** the file content
 - `pathvariable:X` — Variable content **IS A PATH** to a file
 
+> **⚠️ Security — `pathvariable:` is a trust boundary.** The variable's content becomes the
+> path handed to the underlying filesystem, including `s3://`, `http(s)://`, absolute paths and
+> `../` traversal. **Never store untrusted or user-influenced input in a variable you then read
+> through `pathvariable:`** — doing so lets the input's author choose the target (arbitrary local
+> file read, or SSRF to internal/cloud-metadata endpoints), exactly as if you had passed that
+> string straight to `read_csv(...)`. It grants no capability beyond `read_csv(userpath)`, and
+> DuckDB's `enable_external_access` / `allowed_directories` still apply to the resolved path — so
+> keep those gates enabled and treat `pathvariable:` targets as you would any raw user-supplied
+> path.
+
 #### Reading via Path Variable
 
 ```sql
@@ -408,6 +418,29 @@ SELECT * FROM read_csv('decompress+zstd:variable:zstd_compressed_csv');
 | Syntax | `decompress+gz:/path/file.gz` | `archive:///path/file.zip/entry.csv` |
 
 The zipfs `archive:` protocol extracts files from zip archives (e.g., `archive:///data.zip/file.csv`). It does **not** handle gzip or zstd files - use `decompress+gz:` or `decompress+zstd:` for those.
+
+#### Decompression output cap (bomb guard)
+
+Decompressed output is materialized into memory as a raw buffer that is **not** tracked by
+DuckDB's buffer manager, so it is **not** bounded by `SET memory_limit`. To stop a decompression
+bomb (a tiny input that inflates to gigabytes), each `decompress+gz:` / `decompress+zstd:` read is
+capped by the `scalarfs_max_decompressed_bytes` setting:
+
+```sql
+-- Default cap is 256 MiB. Lower it to be stricter, e.g. 16 MiB:
+SET scalarfs_max_decompressed_bytes = 16777216;
+
+-- Or raise it if you legitimately decompress larger payloads.
+SET scalarfs_max_decompressed_bytes = 1073741824;  -- 1 GiB
+
+-- Set to 0 to disable the cap entirely (not recommended for untrusted input).
+SET scalarfs_max_decompressed_bytes = 0;
+```
+
+The cap is enforced at every inflate path — including the zstd frame-declared size (checked
+*before* allocation) and the gzip / zstd-streaming accumulators — so a lying or absent size
+header cannot route around it. When the limit is exceeded the read fails with a clean error
+rather than exhausting memory.
 
 ## Helper Functions
 

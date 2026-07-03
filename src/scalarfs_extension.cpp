@@ -41,6 +41,15 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// Register the decompress filesystem (handles decompress+gz:, decompress+zstd:)
 	fs.RegisterSubSystem(make_uniq<DecompressFileSystem>());
 
+	// Cap the bytes a single decompress+ read may materialize. The decompressed output is a
+	// raw std::string that is NOT tracked by the buffer manager, so it bypasses `memory_limit`;
+	// this option is the ceiling that stops a decompression bomb. 0 disables the cap.
+	config.AddExtensionOption(DecompressFileSystem::MAX_OUTPUT_BYTES_SETTING,
+	                          "Maximum number of bytes a scalarfs decompress+ read may materialize "
+	                          "(decompression-bomb guard; 0 disables the cap)",
+	                          LogicalType::UBIGINT,
+	                          Value::UBIGINT(DecompressFileSystem::DEFAULT_MAX_OUTPUT_BYTES));
+
 	// Register the variable copy function (FORMAT variable)
 	VariableCopyFunction::Register(loader);
 

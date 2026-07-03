@@ -1,0 +1,91 @@
+# name: test/sql/decompress_bomb.test
+# description: Decompression-bomb guard for decompress+gz: / decompress+zstd: (output-size cap)
+# group: [sql]
+#
+# All bombs here are BOUNDED: the declared/actual output is a little over the low test cap
+# (64 KiB) and at most ~1 MiB of zeros -- survivable, never the multi-GB real bomb. Each
+# asserts a clean cap error instead of an unbounded allocation. The cap bypasses memory_limit
+# because the decompressed buffer is a raw std::string, so it needs its own ceiling.
+#
+# On UNFIXED code the `scalarfs_max_decompressed_bytes` setting does not exist, so the very
+# first SET below errors and the whole file fails (red). After the fix it passes (green).
+
+require scalarfs
+
+# =============================================================================
+# Lower the cap so a survivable (KiB/MiB-scale) frame is enough to trip it.
+# =============================================================================
+
+statement ok
+SET scalarfs_max_decompressed_bytes = 65536;
+
+# -----------------------------------------------------------------------------
+# 1. zstd KNOWN-size bomb: frame header declares 1 MiB (> 64 KiB cap).
+#    Must be refused BEFORE the resize()/zero-fill allocation.
+# -----------------------------------------------------------------------------
+
+statement error
+SELECT length(content) FROM read_blob('decompress+zstd:data:;base64,KLUv/aQAABAATAAACAABAPz/ORACAgAQAAIAEAACABAAAgAQAAIAEAACABAAAwAQAPE+FuE=');
+----
+scalarfs_max_decompressed_bytes
+
+# -----------------------------------------------------------------------------
+# 2. zstd STREAMING bomb: frame carries NO declared size (unknown), 256 KiB of
+#    output. The streaming accumulator must abort once it crosses the cap.
+# -----------------------------------------------------------------------------
+
+statement error
+SELECT length(content) FROM read_blob('decompress+zstd:data:;base64,KLUv/QRoTAAACAABAPz/ORACAwAQAEAnD6Y=');
+----
+scalarfs_max_decompressed_bytes
+
+# -----------------------------------------------------------------------------
+# 3. gzip bomb: 256 KiB of output. gzip has no trustworthy declared size, so the
+#    streaming inflate accumulator must abort once it crosses the cap.
+# -----------------------------------------------------------------------------
+
+statement error
+SELECT length(content) FROM read_blob('decompress+gz:data:;base64,H4sIAAAAAAACA+3BMQEAAADCoPVP7W0HoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3gAi6g7iAAAEAA==');
+----
+scalarfs_max_decompressed_bytes
+
+# =============================================================================
+# Positive: raising the cap lets legitimate (bounded) content through, proving
+# the guard is a ceiling and the decompression paths still work end-to-end.
+# =============================================================================
+
+statement ok
+SET scalarfs_max_decompressed_bytes = 4194304;
+
+# zstd known-size 1 MiB decompresses fully under the higher cap
+query I
+SELECT length(content) FROM read_blob('decompress+zstd:data:;base64,KLUv/aQAABAATAAACAABAPz/ORACAgAQAAIAEAACABAAAgAQAAIAEAACABAAAwAQAPE+FuE=');
+----
+1048576
+
+# gzip 256 KiB decompresses fully under the higher cap
+query I
+SELECT length(content) FROM read_blob('decompress+gz:data:;base64,H4sIAAAAAAACA+3BMQEAAADCoPVP7W0HoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3gAi6g7iAAAEAA==');
+----
+262144
+
+# =============================================================================
+# Opt-out: a cap of 0 disables the ceiling (documented escape hatch).
+# =============================================================================
+
+statement ok
+SET scalarfs_max_decompressed_bytes = 0;
+
+query I
+SELECT length(content) FROM read_blob('decompress+zstd:data:;base64,KLUv/aQAABAATAAACAABAPz/ORACAgAQAAIAEAACABAAAgAQAAIAEAACABAAAwAQAPE+FuE=');
+----
+1048576
+
+# Normal small content still decompresses correctly (default-shaped sanity).
+statement ok
+SET scalarfs_max_decompressed_bytes = 65536;
+
+query I
+SELECT content FROM read_text('decompress+gz:data:;base64,H4sIAAAAAAAAA/NIzcnJ11EIzy/KSQEAxoZbJgwAAAA=');
+----
+Hello, World
