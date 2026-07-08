@@ -140,14 +140,15 @@ NULL
 statement ok
 SET VARIABLE bad_path = '/nonexistent/path/to/file.txt';
 
-# Backend-specific error prefix (native "Cannot open file ...", wasm "ENOENT ..."),
-# but both contain the errno string "no such file or directory" -- match that
-# common substring. duckdb's sqllogictest requires statement error to carry an
-# expected message, so we keep one.
+# Error text varies by OS/backend: native POSIX and wasm/emscripten report
+# "... No such file or directory"; Windows reports "... cannot find the path
+# specified". duckdb's sqllogictest requires statement error to carry an
+# expected message, so match either form with a portable regex (RE2 FullMatch,
+# so anchor with (?s).* on both ends).
 statement error
 SELECT * FROM read_text('pathvariable:bad_path');
 ----
-such file or directory
+<REGEX>:(?s).*(such file or directory|cannot find the path specified).*
 
 # =============================================================================
 # Type validation: non-VARCHAR/BLOB types should fail
