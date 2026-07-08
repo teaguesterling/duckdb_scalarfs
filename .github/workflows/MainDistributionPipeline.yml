@@ -29,14 +29,20 @@ jobs:
 
   duckdb-stable-build:
     name: Build extension binaries
-    # Bumped v1.5.3 → v1.5-variegata (tip of the current stable release branch).
-    # The bump pulls the vendored-fmt MSVC fix (duckdb 89f4cd3d3b, "Remove
+    # Submodules track the v1.5-variegata stable release branch (see .gitmodules);
+    # the bump pulls the vendored-fmt MSVC fix (duckdb 89f4cd3d3b, "Remove
     # checked_array_iterator from fmt dep (1.5)"), which is what previously broke
     # Windows -- so Windows is re-enabled below. No Identifier migration landed on
     # this release branch, so the surfaces this extension uses stay API-stable.
+    #
+    # BUILD TARGET is the v1.5.4 *release tag*, not the branch tip: branch-tip
+    # builds emit non-loadable -dev extensions, so the shippable/loadable
+    # artifacts and integration tests must pin the release. ci_tools_version and
+    # the reusable-workflow ref stay on v1.5-variegata (branch) -- matches the
+    # duckdb_zim reference config.
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5-variegata
     with:
-      duckdb_version: v1.5-variegata
+      duckdb_version: v1.5.4
       ci_tools_version: v1.5-variegata
       extension_name: scalarfs
 
@@ -44,7 +50,7 @@ jobs:
     name: Code Quality Check
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v1.5-variegata
     with:
-      duckdb_version: v1.5-variegata
+      duckdb_version: v1.5.4
       ci_tools_version: v1.5-variegata
       extension_name: scalarfs
       format_checks: 'format;tidy'
