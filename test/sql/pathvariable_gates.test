@@ -1,6 +1,7 @@
 # name: test/sql/pathvariable_gates.test
 # description: pathvariable: honors enable_external_access (arbitrary-FS / SSRF gate)
 # group: [sql]
+
 #
 # pathvariable: resolves a variable's *content* to a path and delegates to the parent
 # filesystem. The parent is the context-bound OpenerFileSystem, which runs

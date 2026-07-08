@@ -47,8 +47,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption(DecompressFileSystem::MAX_OUTPUT_BYTES_SETTING,
 	                          "Maximum number of bytes a scalarfs decompress+ read may materialize "
 	                          "(decompression-bomb guard; 0 disables the cap)",
-	                          LogicalType::UBIGINT,
-	                          Value::UBIGINT(DecompressFileSystem::DEFAULT_MAX_OUTPUT_BYTES));
+	                          LogicalType::UBIGINT, Value::UBIGINT(DecompressFileSystem::DEFAULT_MAX_OUTPUT_BYTES));
 
 	// Register the variable copy function (FORMAT variable)
 	VariableCopyFunction::Register(loader);

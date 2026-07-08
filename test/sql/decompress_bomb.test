@@ -1,6 +1,7 @@
 # name: test/sql/decompress_bomb.test
 # description: Decompression-bomb guard for decompress+gz: / decompress+zstd: (output-size cap)
 # group: [sql]
+
 #
 # All bombs here are BOUNDED: the declared/actual output is a little over the low test cap
 # (64 KiB) and at most ~1 MiB of zeros -- survivable, never the multi-GB real bomb. Each
