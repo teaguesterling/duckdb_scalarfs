@@ -58,6 +58,16 @@ public:
 	static constexpr const char *GZIP_PREFIX = "decompress+gz:";
 	static constexpr const char *ZSTD_PREFIX = "decompress+zstd:";
 
+	// Name of the session setting that caps how many bytes a single decompress+ read may
+	// materialize. Guards against decompression bombs: the decompressed output is a raw
+	// std::string that is NOT tracked by the buffer manager, so it bypasses `memory_limit`.
+	static constexpr const char *MAX_OUTPUT_BYTES_SETTING = "scalarfs_max_decompressed_bytes";
+
+	// Default output cap (256 MiB). Generous for the intended small-blob use cases
+	// (data: URIs, variables) while still refusing multi-GB bombs. A value of 0 disables
+	// the cap (opt-out). Configurable via `SET scalarfs_max_decompressed_bytes = N`.
+	static constexpr idx_t DEFAULT_MAX_OUTPUT_BYTES = 256ULL * 1024 * 1024;
+
 private:
 	// Parse the protocol and extract format + underlying path
 	static bool ParseProtocol(const string &path, DecompressFormat &format, string &underlying_path);
@@ -65,8 +75,13 @@ private:
 	// Get the parent filesystem for delegation
 	FileSystem &GetParentFileSystem(optional_ptr<FileOpener> opener);
 
-	// Decompress content based on format
-	static string DecompressContent(const string &compressed, DecompressFormat format);
+	// Resolve the configured output cap from the client context (or the default).
+	static idx_t GetMaxOutputBytes(optional_ptr<FileOpener> opener);
+
+	// Decompress content based on format, refusing to materialize more than max_output_bytes
+	// (0 == unlimited). The cap is enforced at every inflate site (gzip, zstd known-size,
+	// zstd streaming) so a lying or absent size header cannot route around it.
+	static string DecompressContent(const string &compressed, DecompressFormat format, idx_t max_output_bytes);
 };
 
 } // namespace duckdb

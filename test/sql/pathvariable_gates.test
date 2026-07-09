@@ -1,0 +1,37 @@
+# name: test/sql/pathvariable_gates.test
+# description: pathvariable: honors enable_external_access (arbitrary-FS / SSRF gate)
+# group: [sql]
+
+#
+# pathvariable: resolves a variable's *content* to a path and delegates to the parent
+# filesystem. The parent is the context-bound OpenerFileSystem, which runs
+# VerifyCanAccessFile() on the resolved path -- so DuckDB's enable_external_access /
+# allowed_directories gates must still apply. This test asserts that: a path that reads
+# fine with external access ON is REFUSED once external access is turned OFF, proving the
+# indirection does not bypass the gate.
+
+require scalarfs
+
+# Canary file with a distinctive marker, created while external access is enabled.
+statement ok
+COPY (SELECT 'SECRET-CANARY' AS x) TO '__scalarfs_test_pathvar_gate_canary.csv' (FORMAT csv, HEADER false);
+
+statement ok
+SET VARIABLE gate_canary_path = '__scalarfs_test_pathvar_gate_canary.csv';
+
+# Positive control: with external access ON, pathvariable resolves and reads the file.
+query I
+SELECT content LIKE '%SECRET-CANARY%' FROM read_text('pathvariable:gate_canary_path');
+----
+true
+
+# Turn OFF external access (allowed while running; only turning it ON is blocked).
+statement ok
+SET enable_external_access = false;
+
+# Negative: the SAME pathvariable read must now be refused by the access gate, i.e. the
+# indirection honors enable_external_access instead of bypassing it.
+statement error
+SELECT content FROM read_text('pathvariable:gate_canary_path');
+----
+disabled by configuration
