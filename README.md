@@ -18,6 +18,7 @@ DuckDB's file functions (`read_csv`, `read_json`, `COPY TO`, etc.) expect file p
 | `data+blob:` | Escaped BLOB content as file | Read |
 | `decompress+gz:` | Gzip decompression wrapper | Read |
 | `decompress+zstd:` | Zstd decompression wrapper | Read |
+| `pathmacro:` | Paths resolved by an allow-listed scalar macro | Read |
 
 ## Quick Start
 
@@ -442,6 +443,78 @@ The cap is enforced at every inflate path — including the zstd frame-declared 
 header cannot route around it. When the limit is exceeded the read fails with a clean error
 rather than exhausting memory.
 
+### `pathmacro:` — Paths Resolved by a Macro
+
+`pathmacro:<macro>?k=v&...` resolves to real file paths by calling a **scalar macro you register**, so a globbing reader (`read_csv`, `read_json`, `read_parquet`, ...) scans only the files the macro returns. This turns a catalog table into a data-skipping / file-selection layer: the macro decides *which* files to read, the reader does the rest.
+
+```sql
+-- A catalog mapping a key to file paths (a plain table/view or a parquet index)
+CREATE VIEW catalog AS
+  SELECT 'west' AS region, '/data/west.csv' AS file_path
+  UNION ALL SELECT 'east', '/data/east.csv';
+
+-- A scalar macro: MAP(VARCHAR, VARCHAR) -> VARCHAR[] of paths to read
+CREATE MACRO region_files(params) AS (
+  SELECT list(file_path) FROM catalog WHERE region = params['region']
+);
+
+-- Opt in: macros must be allow-listed before pathmacro: will call them
+SET allowed_pathmacros = 'region_files';
+
+-- Reads ONLY the files the macro returns (here: just the east shard)
+SELECT * FROM read_csv('pathmacro:region_files?region=east');
+```
+
+**Contract:**
+
+- The macro takes a single argument — the query string as a `MAP(VARCHAR, VARCHAR)` (`params['region']`) — and must return `VARCHAR[]` (a list of paths). Returning a table? Wrap it: `SELECT list(path) FROM ...`.
+- Returned paths may themselves be globs or other protocols (e.g. `s3://…`, a directory glob); they're re-dispatched to the underlying filesystem.
+- A paramless call is fine: `pathmacro:my_macro` invokes `my_macro(map([], []))`.
+
+**The macro body is ordinary SQL** — selection logic can be as rich as you need:
+
+```sql
+-- List comprehension: build paths straight from a URL param (years=2020,2021)
+CREATE MACRO years_list(p) AS (
+  ['/data/' || y || '.csv' FOR y IN string_split(p['years'], ',')]
+);
+
+-- Arithmetic / range over a catalog
+CREATE MACRO year_between(p) AS (
+  SELECT list(file_path) FROM catalog
+  WHERE year BETWEEN CAST(p['from'] AS INT) AND CAST(p['to'] AS INT)
+);
+
+-- Subquery: only the latest year on record
+CREATE MACRO latest_year(p) AS (
+  SELECT list(file_path) FROM catalog WHERE year = (SELECT max(year) FROM catalog)
+);
+
+-- Return a recursive glob; pathmacro re-dispatches it to the real filesystem
+CREATE MACRO all_shards(p) AS (['/data/**/*.csv']);
+```
+
+**Build URLs safely** with `to_pathmacro_url()` instead of string concatenation — it URL-encodes keys and values so metacharacters survive:
+
+```sql
+SELECT to_pathmacro_url('region_files', {region: 'west', year: 2024});
+-- pathmacro:region_files?region=west&year=2024
+
+SELECT to_pathmacro_url('m', {a: 'x y', b: '1&2'});   -- encodes space and '&'
+-- pathmacro:m?a=x%20y&b=1%262
+
+SELECT from_pathmacro_url('pathmacro:region_files?region=west');  -- parse back
+-- {'macro': region_files, 'params': {region=west}}
+```
+
+**Security** — this protocol runs SQL, so it is locked down by default:
+
+- **Opt-in allow-list:** nothing is callable until you `SET allowed_pathmacros = 'name1,name2'`. The default is empty (no macros allowed).
+- **Identifier validation:** the macro name must be a plain SQL identifier (rejected otherwise, before any lookup).
+- **Injection-safe parameters:** query-string values are passed as escaped string *data* (single quotes doubled; DuckDB literals don't interpret backslashes), never as SQL. A value like `region=west' OR '1'='1` is matched as a literal string, not executed.
+
+See [pathmacro: Protocol Documentation](docs/protocols/pathmacro.md) for the full contract, catalog patterns, and error cases.
+
 ## Helper Functions
 
 Convert between content and URIs programmatically:
@@ -485,6 +558,31 @@ SELECT from_scalarfs_uri('data+varchar:auto-detected');  -- auto-detected
 | Safe text (printable + whitespace) | `data+varchar:` | Zero overhead |
 | Text with few control chars (<10%) | `data+blob:` | Minimal escaping |
 | Binary or heavy escaping needed | `data:;base64,` | Predictable 33% overhead |
+
+### pathmacro: URL Helpers
+
+Build and parse `pathmacro:` URLs without manual string wrangling. `to_pathmacro_url()` validates the macro name and URL-encodes every key/value, so special characters (spaces, `&`, `=`) survive as data.
+
+```sql
+-- Build from a STRUCT (named-argument feel) or a MAP; non-text values cast to text
+SELECT to_pathmacro_url('region_files', {region: 'west', year: 2024});
+-- pathmacro:region_files?region=west&year=2024
+
+SELECT to_pathmacro_url('m', {a: 'x y', b: '1&2', c: 'p=q'});
+-- pathmacro:m?a=x%20y&b=1%262&c=p%3Dq
+
+SELECT to_pathmacro_url('all_files');           -- no params -> bare URL
+-- pathmacro:all_files
+
+-- Parse back into macro + params MAP(VARCHAR, VARCHAR)
+SELECT from_pathmacro_url('pathmacro:region_files?region=west&year=2024');
+-- {'macro': region_files, 'params': {region=west, year=2024}}
+```
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `to_pathmacro_url` | `to_pathmacro_url(macro VARCHAR[, params STRUCT│MAP])` | `VARCHAR` (a `pathmacro:` URL) |
+| `from_pathmacro_url` | `from_pathmacro_url(url VARCHAR)` | `STRUCT(macro VARCHAR, params MAP(VARCHAR, VARCHAR))` |
 
 ## Use Cases
 

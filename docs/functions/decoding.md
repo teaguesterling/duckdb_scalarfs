@@ -231,6 +231,17 @@ FROM (SELECT 'data+varchar:{"a": 1, "b": 2}' AS uri) t,
      read_json(uri) AS parsed;
 ```
 
+## pathmacro: URL Parsing
+
+`from_pathmacro_url()` parses a `pathmacro:` URL back into its macro name and a decoded params map:
+
+```sql
+SELECT from_pathmacro_url('pathmacro:region_files?region=west&year=2024');
+-- {'macro': region_files, 'params': {region=west, year=2024}}
+```
+
+Returns `STRUCT(macro VARCHAR, params MAP(VARCHAR, VARCHAR))`. See the [pathmacro: Protocol](../protocols/pathmacro.md#building-urls-to_pathmacro_url--from_pathmacro_url) for details.
+
 ## See Also
 
 - [Encoding Functions](encoding.md) — Convert content to URIs

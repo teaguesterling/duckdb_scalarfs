@@ -1,6 +1,6 @@
 # Protocol Overview
 
-scalarfs provides seven protocols for accessing in-memory content as files. Each protocol is suited for different use cases.
+scalarfs provides eight protocols for accessing in-memory content or catalog-selected files. Each protocol is suited for different use cases.
 
 ## Protocol Summary
 
@@ -13,6 +13,7 @@ scalarfs provides seven protocols for accessing in-memory content as files. Each
 | `data+blob:` | `data+blob:escaped_content` | Read | Text with control characters |
 | `decompress+gz:` | `decompress+gz:path_or_protocol` | Read | Transparent gzip decompression |
 | `decompress+zstd:` | `decompress+zstd:path_or_protocol` | Read | Transparent zstd decompression |
+| `pathmacro:` | `pathmacro:macro?k=v` | Read | Catalog-driven file selection via a macro |
 
 ## Choosing a Protocol
 
@@ -86,6 +87,22 @@ SELECT * FROM read_text('decompress+gz:variable:gzipped');
 SELECT * FROM read_blob('decompress+zstd:/path/to/data.bin.zst');
 ```
 
+### Use `pathmacro:` when you need to:
+
+- Select which files to read from a catalog/index instead of hard-coding paths
+- Prune a sharded dataset (e.g. files partitioned by region/date) down to just the relevant shards
+- Drive file selection from SQL — the macro can query an index table
+
+```sql
+CREATE MACRO region_files(params) AS (
+  SELECT list(file_path) FROM catalog WHERE region = params['region']
+);
+SET allowed_pathmacros = 'region_files';
+SELECT * FROM read_csv('pathmacro:region_files?region=east');  -- reads only the east shard
+```
+
+`pathmacro:` requires opting in via `allowed_pathmacros`; see [pathmacro: Protocol](pathmacro.md).
+
 ## Protocol Comparison
 
 ### Encoding Overhead
@@ -119,6 +136,7 @@ SELECT * FROM read_blob('decompress+zstd:/path/to/data.bin.zst');
 | `data:` | ❌ No |
 | `decompress+gz:` | ❌ No |
 | `decompress+zstd:` | ❌ No |
+| `pathmacro:` | ❌ No |
 
 ## Pattern Matching
 
@@ -147,3 +165,4 @@ See [Variable Protocol](variable.md) and [PathVariable Protocol](pathvariable.md
 - [data+varchar: Protocol](data-varchar.md) — Zero-overhead inline content
 - [data+blob: Protocol](data-blob.md) — Escaped binary content
 - [decompress+gz: / decompress+zstd:](../README.md#decompress+gz--decompress+zstd--decompression-wrappers) — Transparent decompression wrappers
+- [pathmacro: Protocol](pathmacro.md) — Catalog-driven file selection via a scalar macro

@@ -1,0 +1,62 @@
+# name: test/sql/pathmacro_glob_where.test
+# description: pathmacro: resolves under glob(), and composes with a WHERE on the same value used to select the file
+# group: [sql]
+
+require scalarfs
+
+# =============================================================================
+# Files carry a `region` column, and the 'west' file also contains one 'east'
+# row — so a WHERE on region genuinely filters *within* the selected file, not
+# just across files. The catalog maps region -> file path.
+# =============================================================================
+
+statement ok
+COPY (SELECT * FROM (VALUES (1, 'west', 10), (2, 'west', 20), (3, 'east', 30)) t(id, region, amount))
+  TO '__scalarfs_test_pf_gw_west.csv' (HEADER);
+
+statement ok
+COPY (SELECT * FROM (VALUES (4, 'east', 40), (5, 'east', 50)) t(id, region, amount))
+  TO '__scalarfs_test_pf_gw_east.csv' (HEADER);
+
+statement ok
+CREATE TABLE gw_catalog AS
+  SELECT 'west' AS region, '__scalarfs_test_pf_gw_west.csv' AS file_path
+  UNION ALL SELECT 'east', '__scalarfs_test_pf_gw_east.csv';
+
+statement ok
+CREATE MACRO gw_files(p) AS (SELECT list(file_path) FROM gw_catalog WHERE region = p['region']);
+
+statement ok
+SET allowed_pathmacros = 'gw_files';
+
+# =============================================================================
+# glob() resolves a pathmacro: URL to the real file(s) — inter-file selection on
+# its own, no reader involved. (LIKE keeps this robust to absolute/relative paths.)
+# =============================================================================
+
+query I
+SELECT count(*) FROM glob('pathmacro:gw_files?region=west') WHERE file LIKE '%__scalarfs_test_pf_gw_west.csv';
+----
+1
+
+query I
+SELECT count(*) FROM glob('pathmacro:gw_files?region=east') WHERE file LIKE '%__scalarfs_test_pf_gw_east.csv';
+----
+1
+
+# The 'west' catalog entry points at a single file that holds 3 rows.
+query I
+SELECT count(*) FROM read_csv('pathmacro:gw_files?region=west');
+----
+3
+
+# =============================================================================
+# The same value 'west' drives BOTH the file selection (via pathmacro) and the
+# row filter (via WHERE): pathmacro prunes files, WHERE narrows rows within them.
+# =============================================================================
+
+query ITI
+SELECT id, region, amount FROM read_csv('pathmacro:gw_files?region=west') WHERE region = 'west' ORDER BY id;
+----
+1	west	10
+2	west	20

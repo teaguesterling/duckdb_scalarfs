@@ -1,7 +1,11 @@
 #include "scalarfs_functions.hpp"
+#include "string_encodings.hpp"
+#include "pathmacro_filesystem.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/common/types/blob.hpp"
+#include "duckdb/common/types/value.hpp"
+#include "duckdb/function/function_set.hpp"
 
 namespace duckdb {
 
@@ -20,42 +24,9 @@ static string EncodeVarcharUri(const string_t &input) {
 	return "data+varchar:" + input.GetString();
 }
 
-// Encode content to blob URI with escape sequences
+// Encode content to blob URI with escape sequences (shared implementation)
 static string EncodeBlobUri(const string_t &input) {
-	string result = "data+blob:";
-	const string &content = input.GetString();
-
-	for (unsigned char c : content) {
-		switch (c) {
-		case '\\':
-			result += "\\\\";
-			break;
-		case '\n':
-			result += "\\n";
-			break;
-		case '\r':
-			result += "\\r";
-			break;
-		case '\t':
-			result += "\\t";
-			break;
-		case '\0':
-			result += "\\0";
-			break;
-		default:
-			if (c < 0x20 || c == 0x7F) {
-				// Other control characters: use \xNN
-				char hex[5];
-				snprintf(hex, sizeof(hex), "\\x%02X", c);
-				result += hex;
-			} else {
-				result += c;
-			}
-			break;
-		}
-	}
-
-	return result;
+	return "data+blob:" + EncodeBlobEscapes(input.GetString());
 }
 
 // Auto-select optimal encoding
@@ -114,31 +85,8 @@ static string DecodeDataUri(const string_t &input) {
 		return Blob::FromBase64(data);
 	}
 
-	// URL decode
-	string result;
-	for (size_t i = 0; i < data.size(); i++) {
-		if (data[i] == '%') {
-			if (i + 2 >= data.size()) {
-				throw InvalidInputException("Invalid URL encoding - incomplete '%%' escape at position %d", i);
-			}
-			char c1 = data[i + 1];
-			char c2 = data[i + 2];
-			// Validate hex characters
-			bool valid_hex = ((c1 >= '0' && c1 <= '9') || (c1 >= 'A' && c1 <= 'F') || (c1 >= 'a' && c1 <= 'f')) &&
-			                 ((c2 >= '0' && c2 <= '9') || (c2 >= 'A' && c2 <= 'F') || (c2 >= 'a' && c2 <= 'f'));
-			if (!valid_hex) {
-				throw InvalidInputException("Invalid URL encoding - '%%%c%c' is not valid hex at position %d", c1, c2,
-				                            i);
-			}
-			char hex[3] = {c1, c2, '\0'};
-			long val = strtol(hex, nullptr, 16);
-			result += static_cast<char>(val);
-			i += 2;
-		} else {
-			result += data[i];
-		}
-	}
-	return result;
+	// URL decode (shared implementation)
+	return DecodeURLEncoded(data);
 }
 
 // Decode raw varchar URI
@@ -152,7 +100,7 @@ static string DecodeVarcharUri(const string_t &input) {
 	return uri.substr(13); // len("data+varchar:")
 }
 
-// Decode blob URI with escape sequences
+// Decode blob URI with escape sequences (shared implementation)
 static string DecodeBlobUri(const string_t &input) {
 	const string &uri = input.GetString();
 
@@ -160,58 +108,7 @@ static string DecodeBlobUri(const string_t &input) {
 		throw InvalidInputException("Invalid data+blob: URI - must start with 'data+blob:'");
 	}
 
-	string content = uri.substr(10); // len("data+blob:")
-	string result;
-
-	for (size_t i = 0; i < content.size(); i++) {
-		if (content[i] == '\\' && i + 1 < content.size()) {
-			char next = content[i + 1];
-			switch (next) {
-			case '\\':
-				result += '\\';
-				i++;
-				break;
-			case 'n':
-				result += '\n';
-				i++;
-				break;
-			case 'r':
-				result += '\r';
-				i++;
-				break;
-			case 't':
-				result += '\t';
-				i++;
-				break;
-			case '0':
-				result += '\0';
-				i++;
-				break;
-			case 'x':
-				if (i + 3 < content.size()) {
-					char hex[3] = {content[i + 2], content[i + 3], '\0'};
-					char *end;
-					long val = strtol(hex, &end, 16);
-					if (end == hex + 2) {
-						result += static_cast<char>(val);
-						i += 3;
-					} else {
-						throw InvalidInputException("Invalid escape sequence '\\x%c%c' at position %d", content[i + 2],
-						                            content[i + 3], i);
-					}
-				} else {
-					throw InvalidInputException("Invalid escape sequence - incomplete \\x at position %d", i);
-				}
-				break;
-			default:
-				throw InvalidInputException("Invalid escape sequence '\\%c' at position %d", next, i);
-			}
-		} else {
-			result += content[i];
-		}
-	}
-
-	return result;
+	return DecodeBlobEscapes(uri.substr(10)); // len("data+blob:")
 }
 
 // Auto-detect and decode any scalarfs URI
@@ -227,6 +124,133 @@ static string DecodeScalarfsUri(const string_t &input) {
 	}
 
 	throw InvalidInputException("Invalid scalarfs URI - must start with 'data:', 'data+varchar:', or 'data+blob:'");
+}
+
+// =============================================================================
+// pathmacro: URL builder / parser
+// =============================================================================
+//
+// to_pathmacro_url(macro[, params])  ->  'pathmacro:<macro>?k=v&...'
+//   params is a STRUCT ({region:'west', year:2024}) or MAP(VARCHAR,VARCHAR).
+//   Keys/values are URL-encoded, so a value like '1&2' or 'p=q' survives as a
+//   single param rather than corrupting the query string. The macro name is
+//   validated as a plain identifier (same rule the resolver enforces).
+//
+// from_pathmacro_url(url) -> STRUCT(macro VARCHAR, params MAP(VARCHAR,VARCHAR))
+//   The inverse: parses a pathmacro: URL back into its macro + decoded params.
+
+// A scalar Value's raw string content (no surrounding quotes for VARCHAR).
+static string ValueToRawString(const Value &v) {
+	if (v.type().id() == LogicalTypeId::VARCHAR) {
+		return StringValue::Get(v);
+	}
+	return v.ToString();
+}
+
+static void AppendParamsToUrl(string &url, const Value &params) {
+	if (params.IsNull()) {
+		return;
+	}
+	const auto &type = params.type();
+	vector<std::pair<string, Value>> kvs;
+	if (type.id() == LogicalTypeId::STRUCT) {
+		auto &child_types = StructType::GetChildTypes(type);
+		auto &children = StructValue::GetChildren(params);
+		for (idx_t i = 0; i < children.size(); i++) {
+			kvs.emplace_back(child_types[i].first, children[i]);
+		}
+	} else if (type.id() == LogicalTypeId::MAP) {
+		// A MAP value is physically a LIST of STRUCT(key, value).
+		for (auto &entry : ListValue::GetChildren(params)) {
+			auto &kv = StructValue::GetChildren(entry);
+			kvs.emplace_back(ValueToRawString(kv[0]), kv[1]);
+		}
+	} else {
+		throw InvalidInputException(
+		    "to_pathmacro_url: params must be a STRUCT (e.g. {region:'west'}) or MAP(VARCHAR, VARCHAR), got %s",
+		    type.ToString());
+	}
+
+	bool first = true;
+	for (auto &kv : kvs) {
+		if (kv.second.IsNull()) {
+			continue; // omit params whose value is NULL
+		}
+		url += first ? "?" : "&";
+		first = false;
+		url += EncodeURLComponent(kv.first);
+		url += "=";
+		url += EncodeURLComponent(ValueToRawString(kv.second));
+	}
+}
+
+static string BuildPathmacroUrl(const string &macro, const Value *params) {
+	if (!PathMacroFileSystem::IsSafeIdentifier(macro)) {
+		throw InvalidInputException("to_pathmacro_url: '%s' is not a valid macro name (must be a plain SQL identifier)",
+		                            macro);
+	}
+	string url = "pathmacro:" + macro;
+	if (params) {
+		AppendParamsToUrl(url, *params);
+	}
+	return url;
+}
+
+static void ToPathmacroUrlNoParams(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto count = args.size();
+	for (idx_t row = 0; row < count; row++) {
+		Value mv = args.data[0].GetValue(row);
+		if (mv.IsNull()) {
+			result.SetValue(row, Value(LogicalType::VARCHAR));
+			continue;
+		}
+		result.SetValue(row, Value(BuildPathmacroUrl(StringValue::Get(mv), nullptr)));
+	}
+	result.Verify(count);
+}
+
+static void ToPathmacroUrlWithParams(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto count = args.size();
+	for (idx_t row = 0; row < count; row++) {
+		Value mv = args.data[0].GetValue(row);
+		if (mv.IsNull()) {
+			result.SetValue(row, Value(LogicalType::VARCHAR));
+			continue;
+		}
+		Value pv = args.data[1].GetValue(row);
+		result.SetValue(row, Value(BuildPathmacroUrl(StringValue::Get(mv), &pv)));
+	}
+	result.Verify(count);
+}
+
+static Value ParsePathmacroUrl(const string &url) {
+	if (!StringUtil::StartsWith(url, "pathmacro:")) {
+		throw InvalidInputException("from_pathmacro_url: '%s' is not a pathmacro: URL (must start with 'pathmacro:')",
+		                            url);
+	}
+	auto parsed = PathMacroFileSystem::Parse(url);
+	vector<Value> keys, vals;
+	for (auto &kv : parsed.params) {
+		keys.emplace_back(Value(kv.first));
+		vals.emplace_back(Value(kv.second));
+	}
+	child_list_t<Value> fields;
+	fields.emplace_back("macro", Value(parsed.macro_name));
+	fields.emplace_back("params", Value::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR, keys, vals));
+	return Value::STRUCT(fields);
+}
+
+static void FromPathmacroUrlFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto count = args.size();
+	for (idx_t row = 0; row < count; row++) {
+		Value uv = args.data[0].GetValue(row);
+		if (uv.IsNull()) {
+			result.SetValue(row, Value(result.GetType()));
+			continue;
+		}
+		result.SetValue(row, ParsePathmacroUrl(StringValue::Get(uv)));
+	}
+	result.Verify(count);
 }
 
 // =============================================================================
@@ -317,6 +341,28 @@ ScalarFunction ScalarfsFunctions::GetFromScalarfsUriFunction() {
 	return ScalarFunction("from_scalarfs_uri", {LogicalType::VARCHAR}, LogicalType::VARCHAR, FromScalarfsUriFunction);
 }
 
+ScalarFunctionSet ScalarfsFunctions::GetToPathmacroUrlFunctions() {
+	ScalarFunctionSet set("to_pathmacro_url");
+	// to_pathmacro_url(macro)
+	ScalarFunction no_params("to_pathmacro_url", {LogicalType::VARCHAR}, LogicalType::VARCHAR, ToPathmacroUrlNoParams);
+	no_params.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	set.AddFunction(no_params);
+	// to_pathmacro_url(macro, params)  — params is a STRUCT or MAP (ANY dispatched at runtime)
+	ScalarFunction with_params("to_pathmacro_url", {LogicalType::VARCHAR, LogicalType::ANY}, LogicalType::VARCHAR,
+	                           ToPathmacroUrlWithParams);
+	with_params.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	set.AddFunction(with_params);
+	return set;
+}
+
+ScalarFunction ScalarfsFunctions::GetFromPathmacroUrlFunction() {
+	auto ret = LogicalType::STRUCT(
+	    {{"macro", LogicalType::VARCHAR}, {"params", LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)}});
+	ScalarFunction fn("from_pathmacro_url", {LogicalType::VARCHAR}, ret, FromPathmacroUrlFunction);
+	fn.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	return fn;
+}
+
 void ScalarfsFunctions::Register(ExtensionLoader &loader) {
 	loader.RegisterFunction(GetToDataUriFunction());
 	loader.RegisterFunction(GetToVarcharUriFunction());
@@ -326,6 +372,8 @@ void ScalarfsFunctions::Register(ExtensionLoader &loader) {
 	loader.RegisterFunction(GetFromVarcharUriFunction());
 	loader.RegisterFunction(GetFromBlobUriFunction());
 	loader.RegisterFunction(GetFromScalarfsUriFunction());
+	loader.RegisterFunction(GetToPathmacroUrlFunctions());
+	loader.RegisterFunction(GetFromPathmacroUrlFunction());
 }
 
 } // namespace duckdb

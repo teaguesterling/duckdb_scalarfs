@@ -57,6 +57,7 @@ nav:
     - data: protocols/data-uri.md
     - data+varchar: protocols/data-varchar.md
     - data+blob: protocols/data-blob.md
+    - pathmacro: protocols/pathmacro.md
   - Helper Functions:
     - Encoding: functions/encoding.md
     - Decoding: functions/decoding.md

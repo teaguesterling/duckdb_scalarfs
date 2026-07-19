@@ -201,6 +201,20 @@ SELECT from_scalarfs_uri(to_scalarfs_uri('test content')) = 'test content';
 -- true
 ```
 
+## pathmacro: URL Construction
+
+`to_pathmacro_url()` builds a `pathmacro:` URL from a macro name plus STRUCT or MAP params, URL-encoding each key and value so metacharacters survive:
+
+```sql
+SELECT to_pathmacro_url('region_files', {region: 'west', year: 2024});
+-- pathmacro:region_files?region=west&year=2024
+
+SELECT to_pathmacro_url('m', {a: 'x y', b: '1&2'});   -- encodes space and '&'
+-- pathmacro:m?a=x%20y&b=1%262
+```
+
+See the [pathmacro: Protocol](../protocols/pathmacro.md#building-urls-to_pathmacro_url--from_pathmacro_url) for the full contract.
+
 ## See Also
 
 - [Decoding Functions](decoding.md) — Convert URIs back to content

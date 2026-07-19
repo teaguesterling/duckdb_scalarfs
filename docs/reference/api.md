@@ -108,6 +108,48 @@ SELECT * FROM read_text('data+blob:line1\nline2');
 
 ---
 
+### pathmacro:
+
+Resolve to real file paths by calling an allow-listed scalar macro.
+
+| Property | Value |
+|----------|-------|
+| **Syntax** | `pathmacro:<macro>[?key=value&...]` |
+| **Mode** | Read only |
+| **Glob Support** | Yes (macro may return globs/other protocols, re-dispatched) |
+
+The query string is passed to the macro as a `MAP(VARCHAR, VARCHAR)`; the macro must return `VARCHAR[]` (a list of paths). Requires opt-in via the `allowed_pathmacros` setting.
+
+```sql
+CREATE MACRO region_files(params) AS (
+  SELECT list(file_path) FROM catalog WHERE region = params['region']
+);
+SET allowed_pathmacros = 'region_files';
+SELECT * FROM read_csv('pathmacro:region_files?region=east');
+```
+
+See [pathmacro: Protocol](../protocols/pathmacro.md) for the full contract and security model.
+
+---
+
+## Settings
+
+### allowed_pathmacros
+
+| Property | Value |
+|----------|-------|
+| **Type** | VARCHAR |
+| **Default** | `''` (empty — no macros allowed) |
+| **Scope** | Session |
+
+Comma-separated list of scalar-macro names the `pathmacro:` protocol may invoke. `pathmacro:` is inert until this is set.
+
+```sql
+SET allowed_pathmacros = 'region_files, sample_files';
+```
+
+---
+
 ## Encoding Functions
 
 ### to_data_uri
@@ -266,6 +308,48 @@ Handles: `data:`, `data+varchar:`, `data+blob:`
 
 ---
 
+## pathmacro: URL Functions
+
+### to_pathmacro_url
+
+Build a `pathmacro:` URL, URL-encoding each key and value.
+
+```sql
+to_pathmacro_url(macro VARCHAR) → VARCHAR
+to_pathmacro_url(macro VARCHAR, params STRUCT|MAP) → VARCHAR
+```
+
+`params` may be a `STRUCT` (`{region: 'west', year: 2024}`) or a `MAP(VARCHAR, VARCHAR)`; non-text values are cast to text. The macro name is validated as a plain SQL identifier. NULL params (or none) yield the bare URL.
+
+| Input | Output |
+|-------|--------|
+| `to_pathmacro_url('r', {region:'west', year:2024})` | `'pathmacro:r?region=west&year=2024'` |
+| `to_pathmacro_url('m', {a:'x y', b:'1&2'})` | `'pathmacro:m?a=x%20y&b=1%262'` |
+| `to_pathmacro_url('all')` | `'pathmacro:all'` |
+
+**Errors:**
+
+- `to_pathmacro_url: '<name>' is not a valid macro name (must be a plain SQL identifier)`
+- `to_pathmacro_url: params must be a STRUCT (...) or MAP(VARCHAR, VARCHAR), got <type>`
+
+### from_pathmacro_url
+
+Parse a `pathmacro:` URL into its macro and decoded params.
+
+```sql
+from_pathmacro_url(url VARCHAR) → STRUCT(macro VARCHAR, params MAP(VARCHAR, VARCHAR))
+```
+
+| Input | Output |
+|-------|--------|
+| `from_pathmacro_url('pathmacro:r?region=west')` | `{'macro': r, 'params': {region=west}}` |
+
+**Errors:**
+
+- `from_pathmacro_url: '<url>' is not a pathmacro: URL (must start with 'pathmacro:')`
+
+---
+
 ## Error Messages
 
 ### Variable Protocol Errors
@@ -288,6 +372,15 @@ Handles: `data:`, `data+varchar:`, `data+blob:`
 
 | Error | Cause |
 |-------|-------|
-| `Invalid escape sequence '\xNN'` | Invalid hex digits |
-| `Invalid escape sequence - incomplete \x` | `\x` without 2 hex digits |
+| `Invalid escape sequence: '\xNN' is not valid hex` | Invalid hex digits after `\x` |
+| `Invalid escape sequence: incomplete \x` | `\x` without 2 hex digits |
 | `Invalid escape sequence '\c'` | Unknown escape character |
+
+### pathmacro: Errors
+
+| Error | Cause |
+|-------|-------|
+| `macro 'X' is not in allowed_pathmacros` | Macro not opted in via the setting |
+| `invalid macro name 'X'` | Macro name is not a plain SQL identifier |
+| `macro 'X' must return VARCHAR[]` | Macro returned a non-list-of-varchar value |
+| `catalog macro 'X' failed: ...` | The macro itself raised (e.g. missing table) |

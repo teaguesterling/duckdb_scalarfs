@@ -1,5 +1,6 @@
 #include "data_uri_filesystem.hpp"
 #include "memory_file_handle.hpp"
+#include "string_encodings.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/open_file_info.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -167,37 +168,9 @@ string DataURIFileSystem::ParseBlobURI(const string &uri) {
 // =============================================================================
 // Decoding Helpers
 // =============================================================================
-
-string DataURIFileSystem::DecodeURLEncoded(const string &input) {
-	string result;
-	result.reserve(input.size());
-
-	for (size_t i = 0; i < input.size(); i++) {
-		if (input[i] == '%') {
-			if (i + 2 >= input.size()) {
-				throw IOException("Invalid URL encoding - incomplete '%%' escape at position %llu",
-				                  (unsigned long long)i);
-			}
-			char c1 = input[i + 1];
-			char c2 = input[i + 2];
-			// Validate hex characters
-			bool valid_hex = ((c1 >= '0' && c1 <= '9') || (c1 >= 'A' && c1 <= 'F') || (c1 >= 'a' && c1 <= 'f')) &&
-			                 ((c2 >= '0' && c2 <= '9') || (c2 >= 'A' && c2 <= 'F') || (c2 >= 'a' && c2 <= 'f'));
-			if (!valid_hex) {
-				throw IOException("Invalid URL encoding - '%%%c%c' is not valid hex at position %llu", c1, c2,
-				                  (unsigned long long)i);
-			}
-			char hex[3] = {c1, c2, '\0'};
-			long val = strtol(hex, nullptr, 16);
-			result += static_cast<char>(val);
-			i += 2;
-		} else {
-			result += input[i];
-		}
-	}
-
-	return result;
-}
+//
+// DecodeURLEncoded and DecodeBlobEscapes live in string_encodings.hpp; the call
+// sites in this file resolve to those free functions (same namespace).
 
 string DataURIFileSystem::DecodeBase64(const string &input) {
 	if (input.empty()) {
@@ -205,67 +178,6 @@ string DataURIFileSystem::DecodeBase64(const string &input) {
 	}
 	// Use DuckDB's built-in base64 decoder
 	return Blob::FromBase64(string_t(input));
-}
-
-string DataURIFileSystem::DecodeBlobEscapes(const string &input) {
-	string result;
-	result.reserve(input.size());
-
-	for (size_t i = 0; i < input.size(); i++) {
-		if (input[i] != '\\') {
-			result += input[i];
-			continue;
-		}
-
-		// Escape sequence starts here
-		if (i + 1 >= input.size()) {
-			throw IOException("Invalid escape sequence at end of data+blob: URI");
-		}
-
-		char next = input[i + 1];
-		switch (next) {
-		case '\\':
-			result += '\\';
-			i++;
-			break;
-		case 'n':
-			result += '\n';
-			i++;
-			break;
-		case 'r':
-			result += '\r';
-			i++;
-			break;
-		case 't':
-			result += '\t';
-			i++;
-			break;
-		case '0':
-			result += '\0';
-			i++;
-			break;
-		case 'x': {
-			// Hex escape: \xNN
-			if (i + 3 >= input.size()) {
-				throw IOException("Invalid \\x escape at position %llu: expected 2 hex digits", (unsigned long long)i);
-			}
-			char hex[3] = {input[i + 2], input[i + 3], '\0'};
-			char *end;
-			long val = strtol(hex, &end, 16);
-			if (end != hex + 2) {
-				throw IOException("Invalid \\x escape at position %llu: '%s' is not valid hex", (unsigned long long)i,
-				                  string(hex));
-			}
-			result += static_cast<char>(val);
-			i += 3;
-			break;
-		}
-		default:
-			throw IOException("Invalid escape sequence '\\%c' at position %llu", next, (unsigned long long)i);
-		}
-	}
-
-	return result;
 }
 
 } // namespace duckdb

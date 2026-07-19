@@ -1,0 +1,80 @@
+# name: test/sql/pathmacro_url_builder.test
+# description: to_pathmacro_url / from_pathmacro_url — safe construction and parsing of pathmacro: URLs
+# group: [sql]
+
+require scalarfs
+
+# =============================================================================
+# to_pathmacro_url(macro[, params]) — params is a STRUCT or MAP(VARCHAR,VARCHAR)
+# =============================================================================
+
+# STRUCT params (named-argument ergonomics); non-text values are cast to text.
+query T
+SELECT to_pathmacro_url('region_files', {region: 'west', year: 2024});
+----
+pathmacro:region_files?region=west&year=2024
+
+# MAP params.
+query T
+SELECT to_pathmacro_url('region_files', MAP {'region': 'west'});
+----
+pathmacro:region_files?region=west
+
+# No params, and NULL params, both yield the bare URL.
+query TT
+SELECT to_pathmacro_url('all_files'), to_pathmacro_url('all_files', NULL);
+----
+pathmacro:all_files	pathmacro:all_files
+
+# URL-encoding: a space, '&', and '=' in values must survive as single params
+# (this is the whole point — otherwise the query string would parse wrong).
+query T
+SELECT to_pathmacro_url('m', {a: 'x y', b: '1&2', c: 'p=q'});
+----
+pathmacro:m?a=x%20y&b=1%262&c=p%3Dq
+
+# Invalid macro name is rejected up front.
+statement error
+SELECT to_pathmacro_url('bad-name', {a: '1'});
+----
+not a valid macro name
+
+# params must be a STRUCT or MAP — anything else is rejected.
+statement error
+SELECT to_pathmacro_url('m', 42);
+----
+must be a STRUCT
+
+# =============================================================================
+# from_pathmacro_url(url) -> STRUCT(macro VARCHAR, params MAP(VARCHAR,VARCHAR))
+# =============================================================================
+
+query T
+SELECT from_pathmacro_url('pathmacro:region_files?region=west&year=2024').macro;
+----
+region_files
+
+query T
+SELECT from_pathmacro_url('pathmacro:region_files?region=west&year=2024').params['year'];
+----
+2024
+
+# Round-trip: to_ -> from_ decodes the metacharacters back to their originals.
+query TTT
+SELECT p.params['a'], p.params['b'], p.params['c']
+FROM (SELECT from_pathmacro_url(to_pathmacro_url('m', {a: 'x y', b: '1&2', c: 'p=q'})) AS p) t(p);
+----
+x y	1&2	p=q
+
+# A paramless URL parses to an empty params map (empty-map construction).
+query TI
+SELECT r.macro, len(map_keys(r.params))
+FROM (SELECT from_pathmacro_url('pathmacro:all_files') AS r) t(r);
+----
+all_files	0
+
+# Not a pathmacro: URL -> error.
+statement error
+SELECT from_pathmacro_url('not a url');
+----
+not a pathmacro: URL

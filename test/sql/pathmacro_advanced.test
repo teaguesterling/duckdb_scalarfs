@@ -1,0 +1,85 @@
+# name: test/sql/pathmacro_advanced.test
+# description: pathmacro: macros can use arbitrary SQL to choose files — list comprehensions, arithmetic, subqueries, recursive globs
+# group: [sql]
+
+require scalarfs
+
+# =============================================================================
+# Yearly data files (flat, named by year) + a partitioned directory for the
+# recursive-glob case. A macro can select files with any SQL that yields
+# VARCHAR[]; these four show comprehensions, arithmetic, subqueries and globs.
+# =============================================================================
+
+statement ok
+COPY (SELECT 'a' AS city, 1 AS amount UNION ALL SELECT 'b', 2) TO '__scalarfs_test_pf_adv_2020.csv' (HEADER);
+
+statement ok
+COPY (SELECT 'c' AS city, 3 AS amount) TO '__scalarfs_test_pf_adv_2021.csv' (HEADER);
+
+statement ok
+COPY (SELECT 'd' AS city, 4 AS amount) TO '__scalarfs_test_pf_adv_2022.csv' (HEADER);
+
+# A partitioned directory: region=west/..., region=east/... (auto-creates dirs).
+# OVERWRITE_OR_IGNORE keeps the write idempotent across re-runs of the suite.
+statement ok
+COPY (SELECT * FROM (VALUES ('west', 10), ('east', 20)) t(region, amount))
+  TO '__scalarfs_test_pf_adv_parts' (FORMAT csv, PARTITION_BY (region), HEADER, OVERWRITE_OR_IGNORE true);
+
+# A catalog: year -> file path (drives the arithmetic + subquery macros).
+statement ok
+CREATE TABLE adv_catalog AS
+  SELECT 2020 AS year, '__scalarfs_test_pf_adv_2020.csv' AS file_path
+  UNION ALL SELECT 2021, '__scalarfs_test_pf_adv_2021.csv'
+  UNION ALL SELECT 2022, '__scalarfs_test_pf_adv_2022.csv';
+
+# (1) LIST COMPREHENSION: build the paths directly from a list of years
+#     (the years arrive as a comma-joined, URL-encoded param).
+statement ok
+CREATE MACRO years_list(p) AS (
+  [ '__scalarfs_test_pf_adv_' || y || '.csv' FOR y IN string_split(p['years'], ',') ]
+);
+
+# (2) ARITHMETIC / BETWEEN over the catalog.
+statement ok
+CREATE MACRO year_between(p) AS (
+  SELECT list(file_path) FROM adv_catalog
+  WHERE year BETWEEN CAST(p['from'] AS INT) AND CAST(p['to'] AS INT)
+);
+
+# (3) SUBQUERY: only the latest year available.
+statement ok
+CREATE MACRO latest_year(p) AS (
+  SELECT list(file_path) FROM adv_catalog WHERE year = (SELECT max(year) FROM adv_catalog)
+);
+
+# (4) RECURSIVE ** GLOB: the macro returns a glob; pathmacro re-dispatches it to
+#     the underlying filesystem, which expands it recursively.
+statement ok
+CREATE MACRO glob_all(p) AS ([ '__scalarfs_test_pf_adv_parts/**/*.csv' ]);
+
+statement ok
+SET allowed_pathmacros = 'years_list,year_between,latest_year,glob_all';
+
+# (1) years=2020,2021 -> 2020 (a,b) + 2021 (c) = 3 rows
+query I
+SELECT count(*) FROM read_csv('pathmacro:years_list?years=2020%2C2021');
+----
+3
+
+# (2) BETWEEN 2020 and 2021 -> 3 rows
+query I
+SELECT count(*) FROM read_csv('pathmacro:year_between?from=2020&to=2021');
+----
+3
+
+# (3) latest year (2022) -> just row 'd'
+query TI
+SELECT city, amount FROM read_csv('pathmacro:latest_year');
+----
+d	4
+
+# (4) recursive glob over the partitioned dir -> both partitions (2 rows)
+query I
+SELECT count(*) FROM read_csv('pathmacro:glob_all');
+----
+2

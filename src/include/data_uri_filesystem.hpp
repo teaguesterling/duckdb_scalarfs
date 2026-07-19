@@ -39,10 +39,8 @@ private:
 	string ParseVarcharURI(const string &uri);
 	string ParseBlobURI(const string &uri);
 
-	// Decoding helpers
-	string DecodeURLEncoded(const string &input);
+	// Decoding helpers (URL + blob-escape coding live in string_encodings.hpp)
 	string DecodeBase64(const string &input);
-	string DecodeBlobEscapes(const string &input);
 };
 
 } // namespace duckdb

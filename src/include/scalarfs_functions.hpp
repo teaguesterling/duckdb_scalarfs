@@ -20,6 +20,10 @@ public:
 	static ScalarFunction GetFromBlobUriFunction();
 	static ScalarFunction GetFromScalarfsUriFunction();
 
+	// pathmacro: URL builder / parser (safe constructors for pathmacro: URLs)
+	static ScalarFunctionSet GetToPathmacroUrlFunctions();
+	static ScalarFunction GetFromPathmacroUrlFunction();
+
 	// Register all functions via the extension loader
 	static void Register(ExtensionLoader &loader);
 };

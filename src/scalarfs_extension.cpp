@@ -4,6 +4,7 @@
 #include "data_uri_filesystem.hpp"
 #include "variable_filesystem.hpp"
 #include "pathvariable_filesystem.hpp"
+#include "pathmacro_filesystem.hpp"
 #include "pathvariable_storage_extension.hpp"
 #include "decompress_filesystem.hpp"
 #include "variable_copy_function.hpp"
@@ -30,6 +31,14 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Register the path variable filesystem (handles pathvariable:)
 	fs.RegisterSubSystem(make_uniq<PathVariableFileSystem>());
+
+	// Register the pathmacro filesystem (handles pathmacro:) + its allow-list setting.
+	// pathmacro:<macro>?k=v resolves to real paths by calling a registered scalar
+	// macro returning VARCHAR[]. Opt-in: no macro is invokable until allow-listed.
+	fs.RegisterSubSystem(make_uniq<PathMacroFileSystem>());
+	DBConfig::GetConfig(db).AddExtensionOption(
+	    "allowed_pathmacros", "Comma-separated list of scalar macros invokable via the pathmacro: filesystem",
+	    LogicalType::VARCHAR, Value(""));
 
 	// Register the `pathvariable` storage extension so ATTACH 'pathvariable:var' works.
 	// (The filesystem subsystem alone is not enough because DuckDB's ATTACH path parser

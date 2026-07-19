@@ -1,0 +1,147 @@
+# name: test/sql/pathmacro_catalog.test
+# description: pathmacro: filesystem resolves a scalar macro (VARCHAR[] of paths) to real files
+# group: [sql]
+
+require scalarfs
+
+# =============================================================================
+# Setup: two CSV "shards" + a catalog table mapping a region -> file path,
+# and a scalar macro returning VARCHAR[] of the paths for a given region.
+# Only read_csv is used to read the resolved files.
+# =============================================================================
+
+statement ok
+COPY (SELECT 'A' AS id, 1 AS val UNION ALL SELECT 'B', 2) TO '__scalarfs_test_pf_west.csv' (FORMAT csv, HEADER true);
+
+statement ok
+COPY (SELECT 'C' AS id, 3 AS val UNION ALL SELECT 'D', 4) TO '__scalarfs_test_pf_east.csv' (FORMAT csv, HEADER true);
+
+statement ok
+CREATE TABLE pf_catalog AS
+  SELECT 'west' AS region, '__scalarfs_test_pf_west.csv' AS file_path
+  UNION ALL SELECT 'east', '__scalarfs_test_pf_east.csv';
+
+# Macro receives the query string as a MAP(VARCHAR, VARCHAR); returns VARCHAR[].
+statement ok
+CREATE MACRO region_files(params) AS (
+  SELECT list(file_path) FROM pf_catalog WHERE region = CAST(params['region'] AS VARCHAR)
+);
+
+# =============================================================================
+# Opt-in: nothing is resolvable until the macro is allow-listed
+# =============================================================================
+
+statement error
+SELECT * FROM read_csv('pathmacro:region_files?region=west');
+----
+allowed_pathmacros
+
+statement ok
+SET allowed_pathmacros = 'region_files';
+
+# =============================================================================
+# Resolution: each query touches only the file(s) the macro returns
+# =============================================================================
+
+query II
+SELECT * FROM read_csv('pathmacro:region_files?region=east') ORDER BY id;
+----
+C	3
+D	4
+
+query II
+SELECT * FROM read_csv('pathmacro:region_files?region=west') ORDER BY id;
+----
+A	1
+B	2
+
+# =============================================================================
+# Negatives
+# =============================================================================
+
+# Macro not in the allow-list
+statement error
+SELECT * FROM read_csv('pathmacro:not_allowed?region=west');
+----
+not in allowed_pathmacros
+
+# Invalid macro identifier (rejected before the allow-list check)
+statement error
+SELECT * FROM read_csv('pathmacro:bad-name?region=west');
+----
+invalid macro name
+
+# Macro must return VARCHAR[] (a list of paths)
+statement ok
+CREATE MACRO bad_return(params) AS (SELECT 42);
+
+statement ok
+SET allowed_pathmacros = 'region_files,bad_return';
+
+statement error
+SELECT * FROM read_csv('pathmacro:bad_return?x=1');
+----
+must return VARCHAR[]
+
+# =============================================================================
+# SQL-injection: param values are DATA, not SQL. A quote-bearing payload must
+# be matched as a literal string (matching no region -> empty path list -> "no
+# files" error), NOT executed. If EscapeSingle failed, `west' OR '1'='1` would
+# widen the WHERE to all rows and both shards would be read.
+# =============================================================================
+
+# region = west' OR '1'='1   (percent-encoded quotes/spaces)
+statement error
+SELECT * FROM read_csv('pathmacro:region_files?region=west%27%20OR%20%271%27%3D%271');
+----
+No files found
+
+# region = \'   (backslash + quote; DuckDB plain literals don't interpret \, and
+# the quote is doubled -> arrives as the 2-char literal data "\'", matches nothing)
+statement error
+SELECT * FROM read_csv('pathmacro:region_files?region=%5C%27');
+----
+No files found
+
+# =============================================================================
+# Empty params: a paramless invocation builds `macro(map([], []))`, which must
+# construct rather than trip empty-list type inference.
+# =============================================================================
+
+statement ok
+CREATE MACRO all_files(params) AS (SELECT list(file_path) FROM pf_catalog);
+
+statement ok
+SET allowed_pathmacros = 'region_files,bad_return,all_files';
+
+query II
+SELECT * FROM read_csv('pathmacro:all_files') ORDER BY id;
+----
+A	1
+B	2
+C	3
+D	4
+
+# =============================================================================
+# Metacharacter VALUES survive the full resolve path (decode -> escape -> match),
+# the mirror of the injection test: a benign value containing a space and '&'
+# must MATCH its catalog row, not be corrupted or split into extra params.
+# =============================================================================
+
+statement ok
+CREATE TABLE pf_meta AS SELECT 'a & b c' AS region, '__scalarfs_test_pf_west.csv' AS file_path;
+
+statement ok
+CREATE MACRO meta_files(params) AS (
+  SELECT list(file_path) FROM pf_meta WHERE region = CAST(params['region'] AS VARCHAR)
+);
+
+statement ok
+SET allowed_pathmacros = 'region_files,bad_return,all_files,meta_files';
+
+# region = 'a & b c'  ->  a%20%26%20b%20c  ; matches the row -> reads the west shard
+query II
+SELECT * FROM read_csv('pathmacro:meta_files?region=a%20%26%20b%20c') ORDER BY id;
+----
+A	1
+B	2
