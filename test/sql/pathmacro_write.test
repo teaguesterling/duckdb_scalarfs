@@ -1,0 +1,52 @@
+# name: test/sql/pathmacro_write.test
+# description: pathmacro: is writable — COPY TO resolves a macro to a single path (create + atomic overwrite)
+# group: [sql]
+
+require scalarfs
+
+# A macro returning a scalar VARCHAR — a single write target (the natural shape
+# for a write; reads may still return VARCHAR[]).
+statement ok
+CREATE MACRO out_file(p) AS ('__scalarfs_test_pm_' || p['name'] || '.csv');
+
+statement ok
+SET allowed_pathmacros = 'out_file';
+
+# COPY TO a pathmacro: target (create)
+statement ok
+COPY (SELECT 1 AS id, 'a' AS v UNION ALL SELECT 2, 'b') TO 'pathmacro:out_file?name=w' (FORMAT csv, HEADER);
+
+# Read it back through pathmacro:
+query IT
+SELECT * FROM read_csv('pathmacro:out_file?name=w') ORDER BY id;
+----
+1	a
+2	b
+
+# Overwrite the same target — DuckDB writes a tmp_ sibling then MoveFile()s it
+# onto the final path; new content must fully replace the old.
+statement ok
+COPY (SELECT 9 AS id, 'z' AS v) TO 'pathmacro:out_file?name=w' (FORMAT csv, HEADER);
+
+query IT
+SELECT * FROM read_csv('pathmacro:out_file?name=w');
+----
+9	z
+
+# The atomic overwrite leaves no tmp_ sibling behind.
+query I
+SELECT count(*) FROM glob('tmp___scalarfs_test_pm_*');
+----
+0
+
+# A macro that resolves to >1 path cannot be a write target.
+statement ok
+CREATE MACRO two_files(p) AS (['__scalarfs_test_pm_x.csv', '__scalarfs_test_pm_y.csv']);
+
+statement ok
+SET allowed_pathmacros = 'out_file,two_files';
+
+statement error
+COPY (SELECT 1 AS id) TO 'pathmacro:two_files' (FORMAT csv, HEADER);
+----
+resolved to 2 paths

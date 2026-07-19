@@ -13,7 +13,7 @@ scalarfs provides eight protocols for accessing in-memory content or catalog-sel
 | `data+blob:` | `data+blob:escaped_content` | Read | Text with control characters |
 | `decompress+gz:` | `decompress+gz:path_or_protocol` | Read | Transparent gzip decompression |
 | `decompress+zstd:` | `decompress+zstd:path_or_protocol` | Read | Transparent zstd decompression |
-| `pathmacro:` | `pathmacro:macro?k=v` | Read | Catalog-driven file selection via a macro |
+| `pathmacro:` | `pathmacro:macro?k=v` | Read/Write | Catalog-driven file selection via a macro |
 
 ## Choosing a Protocol
 

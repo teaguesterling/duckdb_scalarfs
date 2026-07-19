@@ -18,7 +18,7 @@ DuckDB's file functions (`read_csv`, `read_json`, `COPY TO`, etc.) expect file p
 | `data+blob:` | Escaped BLOB content as file | Read |
 | `decompress+gz:` | Gzip decompression wrapper | Read |
 | `decompress+zstd:` | Zstd decompression wrapper | Read |
-| `pathmacro:` | Paths resolved by an allow-listed scalar macro | Read |
+| `pathmacro:` | Paths resolved by an allow-listed scalar macro | Read/Write |
 
 ## Quick Start
 

@@ -20,6 +20,7 @@ DuckDB's file functions (`read_csv`, `read_json`, `COPY TO`, etc.) expect file p
 | `data+blob:` | Escaped BLOB content as file | Read |
 | `decompress+gz:` | Gzip decompression wrapper | Read |
 | `decompress+zstd:` | Zstd decompression wrapper | Read |
+| `pathmacro:` | Paths resolved by an allow-listed scalar macro | Read/Write |
 
 ## Quick Example
 
@@ -83,4 +84,5 @@ Ready to use scalarfs? Check out the [Installation Guide](getting-started/instal
 - **Zero-Overhead Inline** — Embed content directly with `data+varchar:content`
 - **Binary Support** — Handle binary content with `data+blob:...` escape sequences
 - **Decompression Wrappers** — Transparently decompress gzip/zstd with `decompress+gz:` and `decompress+zstd:`
+- **Catalog Macros** — Select which files to read (or write) from an index via `pathmacro:macro?k=v`
 - **Helper Functions** — Convert between content and URIs with `to_*_uri()` and `from_*_uri()`

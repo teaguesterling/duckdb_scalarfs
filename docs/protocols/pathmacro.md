@@ -18,7 +18,7 @@ pathmacro:<macro>[?key=value&key=value...]
 The macro must:
 
 1. Take a single argument — the query-string `MAP(VARCHAR, VARCHAR)`.
-2. Return `VARCHAR[]` — a list of file paths to read.
+2. Return `VARCHAR[]` — a list of file paths to read — or a scalar `VARCHAR` (one path).
 
 ```sql
 CREATE MACRO region_files(params) AS (
@@ -113,6 +113,22 @@ CREATE MACRO all_shards(p) AS (['/data/**/*.csv']);
 
 Because the macro can query an index table, the same mechanism scales from a handful of files to a large sharded dataset (e.g. partitioned by region + year): the catalog answers "which files", and the reader's own pushdown handles "which rows within a file".
 
+## Writing
+
+`pathmacro:` is **Read/Write**. `COPY ... TO 'pathmacro:<macro>?...'` writes to a macro-resolved path, so a catalog macro can decide *where* output lands:
+
+```sql
+-- A macro that returns a single output path (a scalar VARCHAR reads most naturally here)
+CREATE MACRO out_file(p) AS ('/data/exports/' || p['name'] || '.parquet');
+SET allowed_pathmacros = 'out_file';
+
+COPY (SELECT * FROM results) TO 'pathmacro:out_file?name=q3' (FORMAT parquet);
+```
+
+- **Writes require the macro to resolve to exactly one path** (a scalar `VARCHAR` return, or a 1-element list). A macro that returns multiple paths errors on write. Reads still accept many.
+- **Overwrite is atomic** — DuckDB writes to a temp sibling and renames it onto the target, so a partial write never corrupts the existing file.
+- Same trust posture as writing through any resolved path: the macro is your own allow-listed SQL, and `enable_external_access` / `allowed_directories` still apply to the resolved target.
+
 ## Building URLs: to_pathmacro_url / from_pathmacro_url
 
 Rather than concatenating URLs by hand (and risking a stray `&` or space corrupting the query string), use the safe constructor. `to_pathmacro_url()` validates the macro name and URL-encodes every key and value.
@@ -176,7 +192,7 @@ Only the macro *name* is treated as an identifier (and it is validated + allow-l
 |-----------|--------|
 | Macro not in `allowed_pathmacros` | Error: `macro '<name>' is not in allowed_pathmacros` |
 | Macro name is not a valid identifier | Error: `invalid macro name '<name>'` |
-| Macro returns a non-`VARCHAR[]` value | Error: `macro '<name>' must return VARCHAR[]` |
+| Macro returns a non-`VARCHAR`/`VARCHAR[]` value | Error: `macro '<name>' must return VARCHAR[]` |
 | Macro raises / references a missing table | Error: `catalog macro '<name>' failed: <underlying error>` |
 | Macro returns an empty list | The reader sees zero files (typically `No files found that match the pattern`) |
 

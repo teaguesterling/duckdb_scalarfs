@@ -71,7 +71,7 @@ SELECT * FROM read_csv('pathmacro:bad-name?region=west');
 ----
 invalid macro name
 
-# Macro must return VARCHAR[] (a list of paths)
+# Macro must return VARCHAR or VARCHAR[] (a path or list of paths)
 statement ok
 CREATE MACRO bad_return(params) AS (SELECT 42);
 
@@ -81,7 +81,7 @@ SET allowed_pathmacros = 'region_files,bad_return';
 statement error
 SELECT * FROM read_csv('pathmacro:bad_return?x=1');
 ----
-must return VARCHAR[]
+must return VARCHAR
 
 # =============================================================================
 # SQL-injection: param values are DATA, not SQL. A quote-bearing payload must

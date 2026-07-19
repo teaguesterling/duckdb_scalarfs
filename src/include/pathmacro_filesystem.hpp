@@ -53,9 +53,10 @@ public:
 	struct ParsedPathMacro {
 		string macro_name;
 		vector<std::pair<string, string>> params; // ordered; keys/vals align
+		bool is_temp = false;                     // path was tmp_pathmacro: (COPY's atomic-write temp)
 	};
 
-	static ParsedPathMacro Parse(const string &path);  // strip prefix, split ?/&/=, url-decode
+	static ParsedPathMacro Parse(const string &path); // strip prefix, split ?/&/=, url-decode
 	static bool IsSafeIdentifier(const string &name); // [A-Za-z_][A-Za-z0-9_]*
 
 	// The only method that matters: resolve params -> real paths.
@@ -65,6 +66,9 @@ public:
 	// FS; error if the macro yields != 1 path (use a globbing reader for many).
 	unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) override;
 	bool FileExists(const string &filename, optional_ptr<FileOpener> opener) override;
+	void RemoveFile(const string &filename, optional_ptr<FileOpener> opener) override;
+	bool TryRemoveFile(const string &filename, optional_ptr<FileOpener> opener) override;
+	void MoveFile(const string &source, const string &target, optional_ptr<FileOpener> opener) override;
 
 	// Byte ops delegate to the wrapped underlying handle (see PathMacroFileHandle).
 	void Read(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override;

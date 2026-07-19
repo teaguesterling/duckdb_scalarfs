@@ -115,10 +115,10 @@ Resolve to real file paths by calling an allow-listed scalar macro.
 | Property | Value |
 |----------|-------|
 | **Syntax** | `pathmacro:<macro>[?key=value&...]` |
-| **Mode** | Read only |
+| **Mode** | Read/Write |
 | **Glob Support** | Yes (macro may return globs/other protocols, re-dispatched) |
 
-The query string is passed to the macro as a `MAP(VARCHAR, VARCHAR)`; the macro must return `VARCHAR[]` (a list of paths). Requires opt-in via the `allowed_pathmacros` setting.
+The query string is passed to the macro as a `MAP(VARCHAR, VARCHAR)`; the macro must return `VARCHAR` (one path) or `VARCHAR[]` (a list of paths). Requires opt-in via the `allowed_pathmacros` setting.
 
 ```sql
 CREATE MACRO region_files(params) AS (
@@ -127,6 +127,8 @@ CREATE MACRO region_files(params) AS (
 SET allowed_pathmacros = 'region_files';
 SELECT * FROM read_csv('pathmacro:region_files?region=east');
 ```
+
+**Writing**: `COPY ... TO 'pathmacro:<macro>?...'` is supported when the macro resolves to **exactly one** path (a scalar `VARCHAR` return is the natural shape). Overwrite is atomic (temp write + rename). Reads may resolve to many paths; writes require one.
 
 See [pathmacro: Protocol](../protocols/pathmacro.md) for the full contract and security model.
 
