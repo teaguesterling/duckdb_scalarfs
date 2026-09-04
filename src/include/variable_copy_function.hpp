@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb.hpp"
+#include "duckdb_compat.hpp"
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
@@ -71,8 +72,10 @@ class VariableCopyFunction {
 public:
 	static void Register(ExtensionLoader &loader);
 
+	// `names` is vector<string> on the pinned v1.5 line and vector<Identifier> on
+	// DuckDB v2.0 (copy_to_bind_t changed); CompatName is whichever this build has.
 	static unique_ptr<FunctionData> Bind(ClientContext &context, CopyFunctionBindInput &input,
-	                                     const vector<string> &names, const vector<LogicalType> &sql_types);
+	                                     const vector<CompatName> &names, const vector<LogicalType> &sql_types);
 
 	static unique_ptr<GlobalFunctionData> InitializeGlobal(ClientContext &context, FunctionData &bind_data,
 	                                                       const string &file_path);
