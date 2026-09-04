@@ -345,12 +345,17 @@ ScalarFunctionSet ScalarfsFunctions::GetToPathmacroUrlFunctions() {
 	ScalarFunctionSet set("to_pathmacro_url");
 	// to_pathmacro_url(macro)
 	ScalarFunction no_params("to_pathmacro_url", {LogicalType::VARCHAR}, LogicalType::VARCHAR, ToPathmacroUrlNoParams);
-	no_params.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	// SetNullHandling rather than assigning the field: v2.0 made Function's
+	// null_handling private. The setter exists identically on both lines
+	// (function.hpp:199 on the pinned v1.5), so this needs no shim -- and it must
+	// still run BEFORE AddFunction, since a FunctionSet hands out
+	// shared_ptr<const T> on v2.0 and cannot be reconfigured after the fact.
+	no_params.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
 	set.AddFunction(no_params);
 	// to_pathmacro_url(macro, params)  — params is a STRUCT or MAP (ANY dispatched at runtime)
 	ScalarFunction with_params("to_pathmacro_url", {LogicalType::VARCHAR, LogicalType::ANY}, LogicalType::VARCHAR,
 	                           ToPathmacroUrlWithParams);
-	with_params.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	with_params.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
 	set.AddFunction(with_params);
 	return set;
 }
@@ -359,7 +364,7 @@ ScalarFunction ScalarfsFunctions::GetFromPathmacroUrlFunction() {
 	auto ret = LogicalType::STRUCT(
 	    {{"macro", LogicalType::VARCHAR}, {"params", LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)}});
 	ScalarFunction fn("from_pathmacro_url", {LogicalType::VARCHAR}, ret, FromPathmacroUrlFunction);
-	fn.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	fn.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
 	return fn;
 }
 
