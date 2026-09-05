@@ -134,3 +134,71 @@ DROP TABLE special;
 #   3. MoveFile transfers data from tmp_foo to foo
 #
 # See variable_tmpfile.test for explicit tests of this behavior.
+
+# =============================================================================
+# Empty writes must clear the variable, not leave the previous value behind
+# =============================================================================
+# COPY of an empty result produces zero bytes. That is a legitimate write of
+# empty content: the target variable must end up empty, not retain whatever it
+# held before the COPY.
+
+statement ok
+CREATE TABLE empty_src(a INTEGER, b INTEGER);
+
+statement ok
+INSERT INTO empty_src VALUES (1, 2);
+
+statement ok
+COPY empty_src TO 'variable:empty_target' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query I
+SELECT rtrim(getvariable('empty_target'), chr(10));
+----
+1,2
+
+statement ok
+DELETE FROM empty_src;
+
+# Empty COPY without a temp file: variable must become empty
+statement ok
+COPY empty_src TO 'variable:empty_target' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query I
+SELECT length(getvariable('empty_target'));
+----
+0
+
+# Empty COPY through the temp-file path must also succeed and clear the value
+statement ok
+COPY empty_src TO 'variable:empty_target2' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+statement ok
+INSERT INTO empty_src VALUES (7, 8);
+
+statement ok
+COPY empty_src TO 'variable:empty_target2' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query I
+SELECT rtrim(getvariable('empty_target2'), chr(10));
+----
+7,8
+
+statement ok
+DELETE FROM empty_src;
+
+statement ok
+COPY empty_src TO 'variable:empty_target2' (FORMAT csv, HEADER false);
+
+query I
+SELECT length(getvariable('empty_target2'));
+----
+0
+
+# An empty variable is still readable as an (empty) file
+query I
+SELECT length(content) FROM read_text('variable:empty_target');
+----
+0
+
+statement ok
+DROP TABLE empty_src;
