@@ -74,18 +74,21 @@ SELECT content FROM read_text('decompress+gz:data:;base64,H4sIAAAAAAAAA/NIzcnJ11
 ----
 Hello, World
 
-# A round-trip through a real Parquet file in a variable must keep working:
-# every positioned read there is satisfiable.
-statement ok
-CREATE TABLE pq_src AS SELECT range AS i, 'v' || range AS s FROM range(500);
-
-statement ok
-COPY pq_src TO 'variable:pq_blob' (FORMAT parquet, USE_TMP_FILE false);
+# A well-formed Parquet file must still read cleanly through the in-memory
+# filesystems. The Parquet reader issues genuine positioned reads here, so this
+# guards against the exact-read check rejecting satisfiable requests.
+# 279-byte uncompressed Parquet file, single INTEGER column i = 0..19.
 
 query II
-SELECT count(*), sum(i) FROM read_parquet('variable:pq_blob');
+SELECT count(*), sum(i) FROM read_parquet('data:application/octet-stream;base64,UEFSMRUAFawBFawBLBUoFQAVBhUGAAACAAAAKAEAAAAAAQAAAAIAAAADAAAABAAAAAUAAAAGAAAABwAAAAgAAAAJAAAACgAAAAsAAAAMAAAADQAAAA4AAAAPAAAAEAAAABEAAAASAAAAEwAAABUCGSw1ABgNZHVja2RiX3NjaGVtYRUCABUCJQIYAWklIgAWKBkcGRwmABwVAhkVABkYAWkVABYoFtIBFtIBJgg8GAQTAAAAGAQAAAAAFgAoBBMAAAAYBAAAAAAREQAAABbSARYoJggW0gEAKC9EdWNrREIgdmVyc2lvbiB2MS41LjUtZGV2MjM4IChidWlsZCBlMTRjM2RiMTg3KRkcHAAAAKIAAABQQVIx');
 ----
-500	124750
+20	190
 
+# ... and through variable: too
 statement ok
-DROP TABLE pq_src;
+SET VARIABLE good_parquet = from_base64('UEFSMRUAFawBFawBLBUoFQAVBhUGAAACAAAAKAEAAAAAAQAAAAIAAAADAAAABAAAAAUAAAAGAAAABwAAAAgAAAAJAAAACgAAAAsAAAAMAAAADQAAAA4AAAAPAAAAEAAAABEAAAASAAAAEwAAABUCGSw1ABgNZHVja2RiX3NjaGVtYRUCABUCJQIYAWklIgAWKBkcGRwmABwVAhkVABkYAWkVABYoFtIBFtIBJgg8GAQTAAAAGAQAAAAAFgAoBBMAAAAYBAAAAAAREQAAABbSARYoJggW0gEAKC9EdWNrREIgdmVyc2lvbiB2MS41LjUtZGV2MjM4IChidWlsZCBlMTRjM2RiMTg3KRkcHAAAAKIAAABQQVIx');
+
+query II
+SELECT count(*), sum(i) FROM read_parquet('variable:good_parquet');
+----
+20	190
