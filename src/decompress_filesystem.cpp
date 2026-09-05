@@ -339,6 +339,13 @@ bool DecompressFileSystem::FileExists(const string &filename, optional_ptr<FileO
 	}
 }
 
+// Flat namespace: a decompress+*: path names a decoded stream, not a path. Nothing here is ever a directory, so the
+// answer is always false. It must still be answered rather than left to FileSystem's base implementation, which throws
+// "not implemented" -- DuckDB v2.0's COPY TO probes the target with DirectoryExists() before writing.
+bool DecompressFileSystem::DirectoryExists(const string &directory, optional_ptr<FileOpener> opener) {
+	return false;
+}
+
 void DecompressFileSystem::Seek(FileHandle &handle, idx_t location) {
 	auto &mem_handle = handle.Cast<MemoryFileHandle>();
 	mem_handle.SetPosition(location);

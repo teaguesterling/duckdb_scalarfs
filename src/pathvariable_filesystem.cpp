@@ -538,6 +538,26 @@ bool PathVariableFileSystem::FileExists(const string &filename, optional_ptr<Fil
 	}
 }
 
+// Mirrors FileExists: resolve the variable's content to a real path and ask the
+// parent filesystem. DuckDB v2.0's COPY TO probes the target with
+// DirectoryExists() before writing, and FileSystem's base implementation throws
+// "not implemented" -- so without this every pathvariable: write fails on v2.0.
+// Delegating rather than returning a flat false keeps the answer honest: a
+// variable whose content names a real directory must report as one.
+bool PathVariableFileSystem::DirectoryExists(const string &directory, optional_ptr<FileOpener> opener) {
+	if (!CanHandleFile(directory)) {
+		return false;
+	}
+
+	try {
+		string resolved_path = ResolvePath(directory, opener);
+		auto &parent_fs = GetParentFileSystem(opener);
+		return parent_fs.DirectoryExists(resolved_path, nullptr);
+	} catch (...) {
+		return false;
+	}
+}
+
 void PathVariableFileSystem::Seek(FileHandle &handle, idx_t location) {
 	auto &pv_handle = handle.Cast<PathVariableFileHandle>();
 	pv_handle.GetUnderlyingFileSystem().Seek(pv_handle.GetUnderlyingHandle(), location);

@@ -66,6 +66,12 @@ public:
 	// FS; error if the macro yields != 1 path (use a globbing reader for many).
 	unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) override;
 	bool FileExists(const string &filename, optional_ptr<FileOpener> opener) override;
+	// DuckDB v2.0's COPY TO path probes the target with DirectoryExists() before
+	// writing (PhysicalCopyToFile / CopyToFileGlobalState). FileSystem's base
+	// implementation throws "not implemented", so every write through this
+	// filesystem fails on v2.0 unless it is overridden. Declared unconditionally:
+	// the signature is identical on v1.5 and v2.0, and v1.5 simply never calls it.
+	bool DirectoryExists(const string &directory, optional_ptr<FileOpener> opener) override;
 	void RemoveFile(const string &filename, optional_ptr<FileOpener> opener) override;
 	bool TryRemoveFile(const string &filename, optional_ptr<FileOpener> opener) override;
 	void MoveFile(const string &source, const string &target, optional_ptr<FileOpener> opener) override;

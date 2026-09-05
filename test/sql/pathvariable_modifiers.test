@@ -149,12 +149,21 @@ SELECT parse_path(file) FROM glob('pathvariable:append:search:test_roots!/__scal
 [., __scalarfs_test_mod_test1.csv]
 
 # append + no-missing: construct paths and filter non-existent
+#
+# Asserted on the LAST path component, not the whole parsed path. These results
+# come back from the PARENT filesystem's Glob, and DuckDB normalizes a leading
+# "./" away as of the v2.0 line -- plain `glob('./x*.csv')`, with no scalarfs
+# involved, returns "x1.csv" there and "./x1.csv" on v1.5. pathvariable: is a
+# faithful pass-through of whatever the parent returns, so pinning the "."
+# component here would assert a DuckDB version rather than this extension's
+# behaviour. What the case is actually about is that append + no-missing yielded
+# exactly the three files that exist.
 query I
-SELECT parse_path(file) FROM glob('pathvariable:append:no-missing:test_roots!/__scalarfs_test_mod_test*.csv') ORDER BY file;
+SELECT parse_path(file)[-1] FROM glob('pathvariable:append:no-missing:test_roots!/__scalarfs_test_mod_test*.csv') ORDER BY file;
 ----
-[., __scalarfs_test_mod_test1.csv]
-[., __scalarfs_test_mod_test2.csv]
-[., __scalarfs_test_mod_test3.csv]
+__scalarfs_test_mod_test1.csv
+__scalarfs_test_mod_test2.csv
+__scalarfs_test_mod_test3.csv
 
 # no-glob + append: append without glob expansion
 statement ok

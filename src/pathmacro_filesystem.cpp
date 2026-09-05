@@ -238,6 +238,27 @@ bool PathMacroFileSystem::FileExists(const string &filename, optional_ptr<FileOp
 	}
 }
 
+// Mirrors FileExists: resolve the macro to a single path and ask the parent
+// filesystem. DuckDB v2.0's COPY TO probes the target with DirectoryExists()
+// before writing, and FileSystem's base implementation throws "not implemented"
+// -- so without this every pathmacro: write fails on v2.0.
+bool PathMacroFileSystem::DirectoryExists(const string &directory, optional_ptr<FileOpener> opener) {
+	if (!CanHandleFile(directory)) {
+		return false;
+	}
+	try {
+		auto context = FileOpener::TryGetClientContext(opener);
+		if (!context) {
+			return false;
+		}
+		auto paths = ResolvePaths(*context, Parse(directory));
+		auto &parent_fs = FileSystem::GetFileSystem(*context);
+		return paths.size() == 1 && parent_fs.DirectoryExists(paths[0], nullptr);
+	} catch (...) {
+		return false;
+	}
+}
+
 // Remove/TryRemove — resolve to a single path and delegate (used by COPY TO for
 // overwrite). Writes are permitted: the macro is the caller's own allow-listed
 // SQL, same trust posture as pathvariable: writes.

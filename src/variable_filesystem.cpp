@@ -273,6 +273,14 @@ bool VariableFileSystem::FileExists(const string &filename, optional_ptr<FileOpe
 	return config.GetUserVariable(var_name, result) && !result.IsNull();
 }
 
+// Flat namespace: variable: names a DuckDB user variable. Nothing here is ever a directory, so the answer is
+// always false. It must still be answered rather than left to FileSystem's base
+// implementation, which throws "not implemented" -- DuckDB v2.0's COPY TO probes
+// the target with DirectoryExists() before writing.
+bool VariableFileSystem::DirectoryExists(const string &directory, optional_ptr<FileOpener> opener) {
+	return false;
+}
+
 void VariableFileSystem::Seek(FileHandle &handle, idx_t location) {
 	if (handle.GetFlags().OpenForWriting()) {
 		auto &write_handle = handle.Cast<VariableWriteHandle>();
