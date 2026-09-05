@@ -8,7 +8,13 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' && github.sha || '' }}
+  # github.event_name is part of the key ON PURPOSE. Without it a push to a branch
+  # and a workflow_dispatch on that same branch collide: same ref, same sha, both
+  # with empty head_ref/base_ref. cancel-in-progress then kills the push run every
+  # time the canary below is dispatched by hand -- and a CANCELLED run renders as a
+  # red `fail` on the checks dashboard, indistinguishable from real breakage. That
+  # has manufactured phantom failures across this fleet; do not remove this segment.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: true
 
 jobs:
