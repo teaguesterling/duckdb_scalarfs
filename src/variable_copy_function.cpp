@@ -15,15 +15,10 @@ namespace duckdb {
 // child_list_t<T> (STRUCT field list) is keyed by string on v1.5.3/v1.4.4 but by
 // Identifier on duckdb main. Build the right key type from a column name so
 // make_pair(...) matches child_list_t's element type across both lines.
-#if __has_include("duckdb/common/identifier.hpp")
-static Identifier StructChildKey(const string &name) {
-	return Identifier(name);
+// CompatMakeName (duckdb_compat.hpp) is exactly this promotion, feature-probed.
+static CompatName StructChildKey(const string &name) {
+	return CompatMakeName(name);
 }
-#else
-static const string &StructChildKey(const string &name) {
-	return name;
-}
-#endif
 
 string VariableCopyFunction::ExtractVariableName(const string &path) {
 	// Extract variable name from "variable:foo" path
@@ -38,7 +33,8 @@ string VariableCopyFunction::ExtractVariableName(const string &path) {
 // =============================================================================
 
 unique_ptr<FunctionData> VariableCopyFunction::Bind(ClientContext &context, CopyFunctionBindInput &input,
-                                                    const vector<string> &names, const vector<LogicalType> &sql_types) {
+                                                    const vector<CompatName> &names,
+                                                    const vector<LogicalType> &sql_types) {
 	// Extract variable name from path
 	string var_name = ExtractVariableName(input.info.file_path);
 
@@ -50,7 +46,8 @@ unique_ptr<FunctionData> VariableCopyFunction::Bind(ClientContext &context, Copy
 	VariableCopyListMode list_mode = VariableCopyListMode::AUTO;
 
 	for (auto &option : input.info.options) {
-		string loption = StringUtil::Lower(option.first);
+		// COPY option keys are Identifiers on v2.0, plain strings on v1.5.
+		string loption = StringUtil::Lower(CompatNameStr(option.first));
 		auto &values = option.second;
 
 		if (loption == "list") {
@@ -78,7 +75,18 @@ unique_ptr<FunctionData> VariableCopyFunction::Bind(ClientContext &context, Copy
 		throw BinderException("LIST scalar mode requires single-column result, got %d columns", sql_types.size());
 	}
 
-	return make_uniq<VariableCopyBindData>(var_name, list_mode, names, sql_types);
+	// Converted element-wise rather than assigned: on v2.0 `names` is a
+	// vector<Identifier>, and Identifier does not implicitly convert to string --
+	// deliberately, since it carries case-insensitive comparison semantics that a
+	// silent conversion would discard. The bind data keeps plain strings; they are
+	// promoted back to child_list_t keys via StructChildKey at use.
+	vector<string> column_names;
+	column_names.reserve(names.size());
+	for (auto &name : names) {
+		column_names.push_back(CompatNameStr(name));
+	}
+
+	return make_uniq<VariableCopyBindData>(var_name, list_mode, std::move(column_names), sql_types);
 }
 
 // =============================================================================

@@ -325,32 +325,63 @@ ScalarFunction ScalarfsFunctions::GetToScalarfsUriFunction() {
 	return ScalarFunction("to_scalarfs_uri", {LogicalType::VARCHAR}, LogicalType::VARCHAR, ToScalarfsUriFunction);
 }
 
+// The decoders all reject malformed input with InvalidInputException (and the
+// base64 paths can raise ConversionException), so they must declare themselves
+// fallible. A function's error mode defaults to CANNOT_ERROR; on v2.0 DuckDB
+// enforces that contract and converts a throw from an undeclared function into
+//
+//   INTERNAL Error: Scalar function "from_data_uri" threw an execution error,
+//   but the function is not marked as fallible - the function must call
+//   SetFallible().
+//
+// which turns every negative test's expected message into an internal error.
+// SetFallible() exists identically on the pinned v1.5 (function.hpp:211), where
+// it is likewise the accurate declaration -- these functions really can throw --
+// so this needs no shim and is not a v2.0-only concession. The encoders above
+// are deliberately NOT marked: they cannot fail on any input.
 ScalarFunction ScalarfsFunctions::GetFromDataUriFunction() {
-	return ScalarFunction("from_data_uri", {LogicalType::VARCHAR}, LogicalType::VARCHAR, FromDataUriFunction);
+	ScalarFunction fn("from_data_uri", {LogicalType::VARCHAR}, LogicalType::VARCHAR, FromDataUriFunction);
+	fn.SetFallible();
+	return fn;
 }
 
 ScalarFunction ScalarfsFunctions::GetFromVarcharUriFunction() {
-	return ScalarFunction("from_varchar_uri", {LogicalType::VARCHAR}, LogicalType::VARCHAR, FromVarcharUriFunction);
+	ScalarFunction fn("from_varchar_uri", {LogicalType::VARCHAR}, LogicalType::VARCHAR, FromVarcharUriFunction);
+	fn.SetFallible();
+	return fn;
 }
 
 ScalarFunction ScalarfsFunctions::GetFromBlobUriFunction() {
-	return ScalarFunction("from_blob_uri", {LogicalType::VARCHAR}, LogicalType::VARCHAR, FromBlobUriFunction);
+	ScalarFunction fn("from_blob_uri", {LogicalType::VARCHAR}, LogicalType::VARCHAR, FromBlobUriFunction);
+	fn.SetFallible();
+	return fn;
 }
 
 ScalarFunction ScalarfsFunctions::GetFromScalarfsUriFunction() {
-	return ScalarFunction("from_scalarfs_uri", {LogicalType::VARCHAR}, LogicalType::VARCHAR, FromScalarfsUriFunction);
+	ScalarFunction fn("from_scalarfs_uri", {LogicalType::VARCHAR}, LogicalType::VARCHAR, FromScalarfsUriFunction);
+	fn.SetFallible();
+	return fn;
 }
 
 ScalarFunctionSet ScalarfsFunctions::GetToPathmacroUrlFunctions() {
 	ScalarFunctionSet set("to_pathmacro_url");
 	// to_pathmacro_url(macro)
 	ScalarFunction no_params("to_pathmacro_url", {LogicalType::VARCHAR}, LogicalType::VARCHAR, ToPathmacroUrlNoParams);
-	no_params.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	// SetNullHandling rather than assigning the field: v2.0 made Function's
+	// null_handling private. The setter exists identically on both lines
+	// (function.hpp:199 on the pinned v1.5), so this needs no shim -- and it must
+	// still run BEFORE AddFunction, since a FunctionSet hands out
+	// shared_ptr<const T> on v2.0 and cannot be reconfigured after the fact.
+	no_params.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
+	// Rejects a macro name that is not a plain SQL identifier, and rejects
+	// unsupported params shapes -- see the note on the decoders above.
+	no_params.SetFallible();
 	set.AddFunction(no_params);
 	// to_pathmacro_url(macro, params)  — params is a STRUCT or MAP (ANY dispatched at runtime)
 	ScalarFunction with_params("to_pathmacro_url", {LogicalType::VARCHAR, LogicalType::ANY}, LogicalType::VARCHAR,
 	                           ToPathmacroUrlWithParams);
-	with_params.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	with_params.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
+	with_params.SetFallible();
 	set.AddFunction(with_params);
 	return set;
 }
@@ -359,7 +390,9 @@ ScalarFunction ScalarfsFunctions::GetFromPathmacroUrlFunction() {
 	auto ret = LogicalType::STRUCT(
 	    {{"macro", LogicalType::VARCHAR}, {"params", LogicalType::MAP(LogicalType::VARCHAR, LogicalType::VARCHAR)}});
 	ScalarFunction fn("from_pathmacro_url", {LogicalType::VARCHAR}, ret, FromPathmacroUrlFunction);
-	fn.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	fn.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
+	// Rejects a URL that is not a pathmacro: URL.
+	fn.SetFallible();
 	return fn;
 }
 

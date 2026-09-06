@@ -8,24 +8,36 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' && github.sha || '' }}
+  # github.event_name is part of the key ON PURPOSE. Without it a push to a branch
+  # and a workflow_dispatch on that same branch collide: same ref, same sha, both
+  # with empty head_ref/base_ref. cancel-in-progress then kills the push run every
+  # time the canary below is dispatched by hand -- and a CANCELLED run renders as a
+  # red `fail` on the checks dashboard, indistinguishable from real breakage. That
+  # has manufactured phantom failures across this fleet; do not remove this segment.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: true
 
 jobs:
-  # duckdb-next (HEAD) build is paused. duckdb main is mid-migration to a typed
-  # Identifier (user_variables keys, child_list_t keys, copy_to_bind_t signature,
-  # and counting) -- a moving target. The source-side fixes here are guarded by
-  # __has_include so they stay forward-compatible; re-enable and re-sync against
-  # the next duckdb *release* once that migration settles. (continue-on-error is
-  # not permitted on reusable-workflow jobs, so we pause the job to unblock CI.)
+  # Forward-compat canary: intentionally builds against duckdb `main` (the v2.0
+  # line, v2.0-cyanoptera). It matters because duckdb/community-extensions builds
+  # EVERY release PR against v2.0 via build_next.yml, with no per-extension
+  # opt-out -- so a red v2.0 build is a red check on every release here.
   #
-  # duckdb-next-build:
-  #   name: Build extension binaries
-  #   uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
-  #   with:
-  #     duckdb_version: main
-  #     ci_tools_version: main
-  #     extension_name: scalarfs
+  # This job was previously commented out because the Identifier migration on
+  # duckdb main was a moving target and `continue-on-error` is not permitted on a
+  # job that calls a reusable workflow (adding it makes the whole workflow fail to
+  # parse, scheduling zero jobs). The fix for that is the `if:` below rather than
+  # deletion: the canary runs only on manual dispatch and on pushes to main, so it
+  # never appears in a PR's check rollup and cannot block a merge. Merge-readiness
+  # is still judged on the stable build below.
+  duckdb-next-build:
+    name: Canary — build against DuckDB main (advisory)
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
+    with:
+      duckdb_version: main
+      ci_tools_version: main
+      extension_name: scalarfs
 
   duckdb-stable-build:
     name: Build extension binaries
