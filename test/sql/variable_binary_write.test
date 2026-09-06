@@ -1,0 +1,151 @@
+# name: test/sql/variable_binary_write.test
+# description: Binary payloads must survive COPY TO 'variable:...' byte for byte (issue #15)
+# group: [sql]
+
+require scalarfs
+
+require parquet
+
+# =============================================================================
+# Why this file exists (issue #15)
+# =============================================================================
+#
+# VariableWriteHandle::Close() used to hand the accumulated buffer to
+# Value::BLOB(const string &). That overload is the *parsing* constructor: it
+# expects text whose non-ASCII bytes are already escaped as \xAA, and it raises
+#
+#   Conversion Error: Invalid byte encountered in STRING -> BLOB conversion
+#
+# on raw binary. Every binary output format therefore failed to write to a
+# variable at all. The raw bytes must go in through Value::BLOB(const_data_ptr_t,
+# idx_t), which copies the buffer verbatim and unescapes nothing.
+#
+# These tests live in their own file rather than in variable_write.test because
+# `require parquet` at the top of that file would gate its existing text-format
+# coverage on the parquet extension being present.
+
+statement ok
+CREATE TABLE pq_src AS SELECT range AS i, ('row_' || range) AS s FROM range(500);
+
+# =============================================================================
+# Parquet: direct write (no temp file)
+# =============================================================================
+
+statement ok
+COPY pq_src TO 'variable:pq_blob' (FORMAT parquet, USE_TMP_FILE false);
+
+query I
+SELECT typeof(getvariable('pq_blob'));
+----
+BLOB
+
+# The payload really is binary: it carries NUL bytes and bytes above 0x7F, which
+# is precisely what a text-oriented BLOB constructor rejects.
+query II
+SELECT getvariable('pq_blob')::VARCHAR LIKE '%\x00%',
+       regexp_matches(getvariable('pq_blob')::VARCHAR, '\\x[89A-Fa-f][0-9A-Fa-f]');
+----
+true	true
+
+# Round-trip: read the variable back and compare the data, not merely "no error"
+query I
+SELECT count(*) FROM read_parquet('variable:pq_blob');
+----
+500
+
+query I
+SELECT count(*) FROM (SELECT * FROM read_parquet('variable:pq_blob') EXCEPT SELECT * FROM pq_src);
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM pq_src EXCEPT SELECT * FROM read_parquet('variable:pq_blob'));
+----
+0
+
+# Byte-for-byte identical to the same COPY against a real file: no escaping,
+# no truncation at the first NUL, no re-encoding.
+statement ok
+COPY pq_src TO '__scalarfs_test_issue15.parquet' (FORMAT parquet, USE_TMP_FILE false);
+
+query I
+SELECT octet_length(getvariable('pq_blob')) = (SELECT octet_length(content) FROM read_blob('__scalarfs_test_issue15.parquet'));
+----
+true
+
+query I
+SELECT getvariable('pq_blob') = (SELECT content FROM read_blob('__scalarfs_test_issue15.parquet'));
+----
+true
+
+# =============================================================================
+# Parquet: default write path (temp file + MoveFile)
+# =============================================================================
+#
+# The default COPY path writes to 'tmp_variable:pq_tmpfile' and then moves it
+# onto 'variable:pq_tmpfile'. Binary has to survive that hop as well.
+
+statement ok
+COPY pq_src TO 'variable:pq_tmpfile' (FORMAT parquet);
+
+query I
+SELECT typeof(getvariable('pq_tmpfile'));
+----
+BLOB
+
+query I
+SELECT count(*) FROM (SELECT * FROM read_parquet('variable:pq_tmpfile') EXCEPT SELECT * FROM pq_src);
+----
+0
+
+query I
+SELECT getvariable('pq_tmpfile') = getvariable('pq_blob');
+----
+true
+
+# =============================================================================
+# A second binary format, so this is not a parquet-only fix
+# =============================================================================
+#
+# gzip output starts 1F 8B 08 00 ... and carries both NUL and high-bit bytes.
+
+statement ok
+COPY pq_src TO 'variable:gz_blob' (FORMAT csv, COMPRESSION gzip, USE_TMP_FILE false);
+
+query I
+SELECT typeof(getvariable('gz_blob'));
+----
+BLOB
+
+query I
+SELECT count(*) FROM read_csv('variable:gz_blob', compression='gzip');
+----
+500
+
+query I
+SELECT count(*) FROM (SELECT * FROM read_csv('variable:gz_blob', compression='gzip') EXCEPT SELECT * FROM pq_src);
+----
+0
+
+# =============================================================================
+# Text formats keep landing in the variable as VARCHAR
+# =============================================================================
+#
+# The fix is about how the bytes are constructed, not about reclassifying
+# ordinary text output.
+
+statement ok
+COPY (SELECT 1 AS a, 2 AS b) TO 'variable:txt_out' (FORMAT csv, HEADER false, USE_TMP_FILE false);
+
+query I
+SELECT typeof(getvariable('txt_out'));
+----
+VARCHAR
+
+query I
+SELECT rtrim(getvariable('txt_out'), chr(10));
+----
+1,2
+
+statement ok
+DROP TABLE pq_src;
