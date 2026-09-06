@@ -44,7 +44,15 @@ void VariableWriteHandle::Close() {
 	bool has_null = memchr(buffer.data(), '\0', buffer.size()) != nullptr;
 
 	if (has_null) {
-		config.SetUserVariable(var_name, Value::BLOB(buffer));
+		// Value::BLOB(const string &) is the PARSING constructor: it expects text
+		// whose non-ASCII bytes are already escaped (\xAA) and raises "Invalid byte
+		// encountered in STRING -> BLOB conversion" on anything else. A `string`
+		// argument binds to that overload exactly, so the raw-bytes overload has to
+		// be selected explicitly: Value::BLOB(const_data_ptr_t, idx_t) copies the
+		// buffer verbatim and unescapes nothing, which is what a file write needs.
+		// Without this, no binary output format could be written to a variable at
+		// all -- see test/sql/variable_binary_write.test.
+		config.SetUserVariable(var_name, Value::BLOB(const_data_ptr_cast(buffer.data()), buffer.size()));
 	} else {
 		config.SetUserVariable(var_name, Value(buffer));
 	}
