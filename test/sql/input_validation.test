@@ -1,6 +1,19 @@
-# name: test/sql/stress_and_security.test
-# description: Stress tests, boundary conditions, and security tests
+# name: test/sql/input_validation.test
+# description: Input validation and robustness: value coercion, malformed URIs, boundary sizes, hostile payloads
 # group: [sql]
+
+#
+# Scope note: this file is an *input-validation* suite. Everything below feeds the
+# scalarfs URI parsers and variable readers something odd -- an unexpected value type,
+# empty or single-byte content, a malformed data: URI, a bad base64/hex escape, an
+# oversized or adversarially-shaped payload -- and asserts a clean result or a clean
+# error rather than a crash or silent garbage.
+#
+# It was previously named stress_and_security.test, which over-promised: it does not
+# test resource limits or path scoping. Those live in their own suites:
+#   - resource limits (decompression-bomb output cap): test/sql/decompress_bomb.test
+#   - path scoping / external-access gating:           test/sql/pathvariable_gates.test
+#   - exact-read contract for the in-memory FSs:       test/sql/memoryfs_read_contract.test
 
 require scalarfs
 

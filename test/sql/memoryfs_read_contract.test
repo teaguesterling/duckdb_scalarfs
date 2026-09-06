@@ -1,0 +1,94 @@
+# name: test/sql/memoryfs_read_contract.test
+# description: Positioned exact-read contract for the in-memory filesystems (data:, variable:, decompress+*:)
+# group: [sql]
+
+require scalarfs
+
+require parquet
+
+# =============================================================================
+# Positioned exact reads must throw, not silently under-read
+# =============================================================================
+#
+# FileSystem::Read(handle, buffer, nr_bytes, location) is an EXACT read: it must
+# either fill `nr_bytes` bytes or raise. DuckDB's LocalFileSystem raises
+# "Could not read enough bytes ...". A filesystem that instead copies only what
+# it has leaves the tail of the caller's buffer uninitialized, so the caller
+# silently consumes garbage.
+#
+# The probe below is a 15-byte hand-crafted Parquet file:
+#
+#   "PAR1"            magic
+#   68 E8 07          thrift compact: field 6 (created_by), type BINARY, len 1000
+#   03 00 00 00       footer length = 3
+#   "PAR1"            magic
+#
+# The footer is well-formed enough to get past every length check in the Parquet
+# reader, and then makes the thrift decoder request 1000 bytes from offset 7 of
+# a 15-byte file. That is a positioned read that cannot be satisfied.
+# base64: UEFSMWjoBwMAAABQQVIx
+
+# data: URI
+statement error
+SELECT * FROM read_parquet('data:application/octet-stream;base64,UEFSMWjoBwMAAABQQVIx');
+----
+Could not read enough bytes
+
+# variable: (BLOB variable)
+statement ok
+SET VARIABLE short_parquet = from_base64('UEFSMWjoBwMAAABQQVIx');
+
+statement error
+SELECT * FROM read_parquet('variable:short_parquet');
+----
+Could not read enough bytes
+
+# decompress+gz: (gzip of the same 15 bytes)
+statement error
+SELECT * FROM read_parquet('decompress+gz:data:;base64,H4sIAAAAAAAC/wtwDDLMeMHOzMDAEABkAgBojmwkDwAAAA==');
+----
+Could not read enough bytes
+
+# =============================================================================
+# Reads that CAN be satisfied must still work (no over-eager throwing)
+# =============================================================================
+
+statement ok
+SET VARIABLE ok_csv = 'a,b
+1,2
+3,4';
+
+query II
+SELECT * FROM read_csv('variable:ok_csv');
+----
+1	2
+3	4
+
+query I
+SELECT content FROM read_text('data+varchar:hello world');
+----
+hello world
+
+query I
+SELECT content FROM read_text('decompress+gz:data:;base64,H4sIAAAAAAAAA/NIzcnJ11EIzy/KSQEAxoZbJgwAAAA=');
+----
+Hello, World
+
+# A well-formed Parquet file must still read cleanly through the in-memory
+# filesystems. The Parquet reader issues genuine positioned reads here, so this
+# guards against the exact-read check rejecting satisfiable requests.
+# 279-byte uncompressed Parquet file, single INTEGER column i = 0..19.
+
+query II
+SELECT count(*), sum(i) FROM read_parquet('data:application/octet-stream;base64,UEFSMRUAFawBFawBLBUoFQAVBhUGAAACAAAAKAEAAAAAAQAAAAIAAAADAAAABAAAAAUAAAAGAAAABwAAAAgAAAAJAAAACgAAAAsAAAAMAAAADQAAAA4AAAAPAAAAEAAAABEAAAASAAAAEwAAABUCGSw1ABgNZHVja2RiX3NjaGVtYRUCABUCJQIYAWklIgAWKBkcGRwmABwVAhkVABkYAWkVABYoFtIBFtIBJgg8GAQTAAAAGAQAAAAAFgAoBBMAAAAYBAAAAAAREQAAABbSARYoJggW0gEAKC9EdWNrREIgdmVyc2lvbiB2MS41LjUtZGV2MjM4IChidWlsZCBlMTRjM2RiMTg3KRkcHAAAAKIAAABQQVIx');
+----
+20	190
+
+# ... and through variable: too
+statement ok
+SET VARIABLE good_parquet = from_base64('UEFSMRUAFawBFawBLBUoFQAVBhUGAAACAAAAKAEAAAAAAQAAAAIAAAADAAAABAAAAAUAAAAGAAAABwAAAAgAAAAJAAAACgAAAAsAAAAMAAAADQAAAA4AAAAPAAAAEAAAABEAAAASAAAAEwAAABUCGSw1ABgNZHVja2RiX3NjaGVtYRUCABUCJQIYAWklIgAWKBkcGRwmABwVAhkVABkYAWkVABYoFtIBFtIBJgg8GAQTAAAAGAQAAAAAFgAoBBMAAAAYBAAAAAAREQAAABbSARYoJggW0gEAKC9EdWNrREIgdmVyc2lvbiB2MS41LjUtZGV2MjM4IChidWlsZCBlMTRjM2RiMTg3KRkcHAAAAKIAAABQQVIx');
+
+query II
+SELECT count(*), sum(i) FROM read_parquet('variable:good_parquet');
+----
+20	190
