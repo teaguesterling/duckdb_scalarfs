@@ -31,12 +31,13 @@ VariableWriteHandle::VariableWriteHandle(FileSystem &fs, string path, string var
 }
 
 void VariableWriteHandle::Close() {
-	// Write the accumulated buffer to the variable
-	if (buffer.empty()) {
-		// Nothing written, don't overwrite existing variable
-		return;
-	}
-
+	// Write the accumulated buffer to the variable.
+	//
+	// An empty buffer is a legitimate write of empty content (e.g.
+	// `COPY (SELECT ... WHERE false) TO 'variable:x'`), not a no-op: skipping it
+	// would leave the previous value of the variable in place, and would also
+	// break the USE_TMP_FILE path, where MoveFile() then fails to find the
+	// never-created tmp_ variable.
 	auto &config = ClientConfig::GetConfig(context);
 
 	// Check for null bytes to determine type (BLOB vs VARCHAR)
@@ -197,11 +198,20 @@ void VariableFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_bytes
 	auto &read_handle = handle.Cast<VariableReadHandle>();
 	const auto &data = read_handle.GetData();
 
-	if (location >= data.size()) {
+	// Positioned Read() is an *exact* read: it must fill nr_bytes or raise.
+	// Silently copying only what is available leaves the tail of the caller's
+	// buffer uninitialized, so the caller consumes garbage. Mirror
+	// LocalFileSystem's error text so behaviour is identical across filesystems.
+	if (nr_bytes <= 0) {
 		return;
 	}
+	auto bytes_to_read = static_cast<idx_t>(nr_bytes);
+	if (location > data.size() || bytes_to_read > data.size() - location) {
+		throw IOException(
+		    "Could not read enough bytes from file \"%s\": attempted to read %llu bytes from location %llu",
+		    handle.path, static_cast<uint64_t>(bytes_to_read), static_cast<uint64_t>(location));
+	}
 
-	idx_t bytes_to_read = MinValue<idx_t>(nr_bytes, data.size() - location);
 	memcpy(buffer, data.data() + location, bytes_to_read);
 }
 

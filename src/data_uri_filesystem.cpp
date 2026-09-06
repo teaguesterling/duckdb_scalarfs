@@ -51,11 +51,20 @@ void DataURIFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_bytes,
 	auto &mem_handle = handle.Cast<MemoryFileHandle>();
 	const auto &data = mem_handle.GetData();
 
-	if (location >= data.size()) {
+	// Positioned Read() is an *exact* read: it must fill nr_bytes or raise.
+	// Silently copying only what is available leaves the tail of the caller's
+	// buffer uninitialized, so the caller consumes garbage. Mirror
+	// LocalFileSystem's error text so behaviour is identical across filesystems.
+	if (nr_bytes <= 0) {
 		return;
 	}
+	auto bytes_to_read = static_cast<idx_t>(nr_bytes);
+	if (location > data.size() || bytes_to_read > data.size() - location) {
+		throw IOException(
+		    "Could not read enough bytes from file \"%s\": attempted to read %llu bytes from location %llu",
+		    handle.path, static_cast<uint64_t>(bytes_to_read), static_cast<uint64_t>(location));
+	}
 
-	idx_t bytes_to_read = MinValue<idx_t>(nr_bytes, data.size() - location);
 	memcpy(buffer, data.data() + location, bytes_to_read);
 }
 
