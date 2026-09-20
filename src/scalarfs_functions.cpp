@@ -6,6 +6,7 @@
 #include "duckdb/common/types/blob.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/function/function_set.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 
 namespace duckdb {
 
@@ -397,16 +398,207 @@ ScalarFunction ScalarfsFunctions::GetFromPathmacroUrlFunction() {
 }
 
 void ScalarfsFunctions::Register(ExtensionLoader &loader) {
-	loader.RegisterFunction(GetToDataUriFunction());
-	loader.RegisterFunction(GetToVarcharUriFunction());
-	loader.RegisterFunction(GetToBlobUriFunction());
-	loader.RegisterFunction(GetToScalarfsUriFunction());
-	loader.RegisterFunction(GetFromDataUriFunction());
-	loader.RegisterFunction(GetFromVarcharUriFunction());
-	loader.RegisterFunction(GetFromBlobUriFunction());
-	loader.RegisterFunction(GetFromScalarfsUriFunction());
-	loader.RegisterFunction(GetToPathmacroUrlFunctions());
-	loader.RegisterFunction(GetFromPathmacroUrlFunction());
+	// to_data_uri
+	{
+		CreateScalarFunctionInfo info(GetToDataUriFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc1;
+		desc1.parameter_types = {LogicalType::VARCHAR};
+		desc1.parameter_names = {"content"};
+		desc1.description = "Encode a string into an RFC 2397 data: URI.";
+		desc1.examples = {"to_data_uri('hello world')"};
+		desc1.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc1);
+
+		FunctionDescription desc2;
+		desc2.parameter_types = {LogicalType::VARCHAR, LogicalType::VARCHAR};
+		desc2.parameter_names = {"content", "mime_type"};
+		desc2.description = "Encode a string into an RFC 2397 data: URI with a custom MIME type.";
+		desc2.examples = {"to_data_uri('hello world', 'text/plain')"};
+		desc2.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc2);
+
+		FunctionDescription desc3;
+		desc3.parameter_types = {LogicalType::BLOB};
+		desc3.parameter_names = {"data"};
+		desc3.description = "Encode binary data into a base64 RFC 2397 data: URI.";
+		desc3.examples = {"to_data_uri('\\x68\\x65\\x6c\\x6c\\x6f'::BLOB)"};
+		desc3.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc3);
+
+		FunctionDescription desc4;
+		desc4.parameter_types = {LogicalType::BLOB, LogicalType::VARCHAR};
+		desc4.parameter_names = {"data", "mime_type"};
+		desc4.description = "Encode binary data into a base64 RFC 2397 data: URI with a custom MIME type.";
+		desc4.examples = {"to_data_uri('\\x68\\x65\\x6c\\x6c\\x6f'::BLOB, 'application/octet-stream')"};
+		desc4.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc4);
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// to_varchar_uri
+	{
+		CreateScalarFunctionInfo info(GetToVarcharUriFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc;
+		desc.parameter_names = {"content"};
+		desc.description = "Encode a string as a percent-encoded varchar: URI.";
+		desc.examples = {"to_varchar_uri('hello world')"};
+		desc.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc);
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// to_blob_uri
+	{
+		CreateScalarFunctionInfo info(GetToBlobUriFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc1;
+		desc1.parameter_types = {LogicalType::BLOB};
+		desc1.parameter_names = {"data"};
+		desc1.description = "Encode binary data as a hex-encoded blob: URI.";
+		desc1.examples = {"to_blob_uri('\\x68\\x65\\x6c\\x6c\\x6f'::BLOB)"};
+		desc1.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc1);
+
+		FunctionDescription desc2;
+		desc2.parameter_types = {LogicalType::VARCHAR};
+		desc2.parameter_names = {"content"};
+		desc2.description = "Encode a string as a hex-encoded blob: URI.";
+		desc2.examples = {"to_blob_uri('hello world')"};
+		desc2.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc2);
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// to_scalarfs_uri
+	{
+		CreateScalarFunctionInfo info(GetToScalarfsUriFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc1;
+		desc1.parameter_types = {LogicalType::VARCHAR, LogicalType::VARCHAR};
+		desc1.parameter_names = {"scheme", "content"};
+		desc1.description = "Encode string content into a custom-scheme scalarfs URI.";
+		desc1.examples = {"to_scalarfs_uri('varchar', 'hello world')"};
+		desc1.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc1);
+
+		FunctionDescription desc2;
+		desc2.parameter_types = {LogicalType::VARCHAR, LogicalType::BLOB};
+		desc2.parameter_names = {"scheme", "data"};
+		desc2.description = "Encode binary data into a custom-scheme scalarfs URI.";
+		desc2.examples = {"to_scalarfs_uri('blob', '\\x68\\x65\\x6c\\x6c\\x6f'::BLOB)"};
+		desc2.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc2);
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// from_data_uri
+	{
+		CreateScalarFunctionInfo info(GetFromDataUriFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc;
+		desc.parameter_names = {"uri"};
+		desc.description = "Decode an RFC 2397 data: URI to its payload string.";
+		desc.examples = {"from_data_uri('data:text/plain;base64,aGVsbG8=')"};
+		desc.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc);
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// from_varchar_uri
+	{
+		CreateScalarFunctionInfo info(GetFromVarcharUriFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc;
+		desc.parameter_names = {"uri"};
+		desc.description = "Decode a varchar: URI to its string payload.";
+		desc.examples = {"from_varchar_uri('varchar:hello%20world')"};
+		desc.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc);
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// from_blob_uri
+	{
+		CreateScalarFunctionInfo info(GetFromBlobUriFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc;
+		desc.parameter_names = {"uri"};
+		desc.description = "Decode a blob: URI to its string payload.";
+		desc.examples = {"from_blob_uri('blob:68656c6c6f')"};
+		desc.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc);
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// from_scalarfs_uri
+	{
+		CreateScalarFunctionInfo info(GetFromScalarfsUriFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc;
+		desc.parameter_names = {"uri"};
+		desc.description = "Decode any scalarfs-compatible URI to its string payload.";
+		desc.examples = {"from_scalarfs_uri('varchar:hello%20world')"};
+		desc.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc);
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// to_pathmacro_url
+	{
+		CreateScalarFunctionInfo info(GetToPathmacroUrlFunctions());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc1;
+		desc1.parameter_types = {LogicalType::VARCHAR};
+		desc1.parameter_names = {"macro"};
+		desc1.description = "Construct a pathmacro: URL from a macro name.";
+		desc1.examples = {"to_pathmacro_url('my_macro')"};
+		desc1.categories = {"scalarfs", "pathmacro"};
+		info.descriptions.push_back(desc1);
+
+		FunctionDescription desc2;
+		desc2.parameter_types = {LogicalType::VARCHAR, LogicalType::ANY};
+		desc2.parameter_names = {"macro", "params"};
+		desc2.description = "Construct a pathmacro: URL from a macro name and parameters struct/map.";
+		desc2.examples = {"to_pathmacro_url('my_macro', {'key': 'val'})"};
+		desc2.categories = {"scalarfs", "pathmacro"};
+		info.descriptions.push_back(desc2);
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// from_pathmacro_url
+	{
+		CreateScalarFunctionInfo info(GetFromPathmacroUrlFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc;
+		desc.parameter_names = {"url"};
+		desc.description = "Parse a pathmacro: URL into a struct containing macro name and parameters map.";
+		desc.examples = {"from_pathmacro_url('pathmacro:my_macro?key=val')"};
+		desc.categories = {"scalarfs", "pathmacro"};
+		info.descriptions.push_back(desc);
+
+		loader.RegisterFunction(std::move(info));
+	}
 }
 
 } // namespace duckdb
