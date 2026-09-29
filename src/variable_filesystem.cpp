@@ -1,4 +1,5 @@
 #include "variable_filesystem.hpp"
+#include "duckdb_compat.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/file_opener.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -175,12 +176,10 @@ vector<OpenFileInfo> VariableFileSystem::Glob(const string &path, FileOpener *op
 	vector<OpenFileInfo> result;
 
 	for (const auto &entry : config.user_variables) {
-#if __has_include("duckdb/common/identifier.hpp")
-		// duckdb main keys ClientConfig::user_variables by Identifier, not string.
-		const string &var_name = entry.first.GetIdentifierName();
-#else
-		const string &var_name = entry.first;
-#endif
+		// CompatNameStr resolves on entry.first's actual type (string on the v1.5.x
+		// line incl. the v1.5.6 partial backport, Identifier on v2.0), not on whether
+		// identifier.hpp is present — those two facts have come apart on v1.5.6.
+		const string var_name = CompatNameStr(entry.first);
 		const Value &var_value = entry.second;
 
 		// Skip NULL variables (they can't be read anyway)
