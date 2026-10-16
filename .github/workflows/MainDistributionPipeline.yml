@@ -18,20 +18,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Forward-compat canary: intentionally builds against duckdb `main` (the v2.0
-  # line, v2.0-cyanoptera). It matters because duckdb/community-extensions builds
-  # EVERY release PR against v2.0 via build_next.yml, with no per-extension
-  # opt-out -- so a red v2.0 build is a red check on every release here.
+  # THE NEXT-LINE BUILD: the v2.0 RELEASE branch, not `main`. One canary line for
+  # the whole fleet, and the branch v2.0.0 is cut from. Pinning the release branch
+  # is what makes a red run actionable -- `main` moves underneath the job, so a
+  # failure there cannot be told apart from upstream churn.
   #
-  # This job was previously commented out because the Identifier migration on
-  # duckdb main was a moving target and `continue-on-error` is not permitted on a
-  # job that calls a reusable workflow (adding it makes the whole workflow fail to
-  # parse, scheduling zero jobs). The fix for that is the `if:` below rather than
-  # deletion: the canary runs only on manual dispatch and on pushes to main, so it
-  # never appears in a PR's check rollup and cannot block a merge. Merge-readiness
-  # is still judged on the stable build below.
+  # It runs on pull requests as well as pushes to main, because what it checks is a
+  # property of the CHANGE, not of upstream drift. duckdb/community-extensions
+  # builds every release against the v2.0 line with no per-extension opt-out, so a
+  # break here is a red check on every release -- which is why this is a gate and
+  # not advisory.
+  #
+  # `if` rather than `continue-on-error`: a job calling a REUSABLE WORKFLOW accepts
+  # only name/needs/if/permissions/uses/with/secrets/strategy/concurrency, and
+  # adding continue-on-error makes the whole workflow fail to PARSE (zero jobs
+  # scheduled, run marked failed).
   duckdb-next-build:
-    name: Canary — build against DuckDB main (advisory)
+    name: Next-line build — DuckDB v2.0
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
+    with:
+      duckdb_version: v2.0-cyanoptera
+      ci_tools_version: main
+      extension_name: scalarfs
+
+  # Advisory canary against duckdb `main`, which is AHEAD of the v2.0 release
+  # branch. Kept as its own job rather than merged into the one above: this one may
+  # legitimately be red on churn that will never reach v2.0.0, so it stays gated to
+  # dispatch and pushes to main and never enters a PR's check rollup.
+  duckdb-main-canary:
+    name: Canary build — DuckDB main (advisory)
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
     with:
