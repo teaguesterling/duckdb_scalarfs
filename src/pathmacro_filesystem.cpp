@@ -144,7 +144,14 @@ vector<string> PathMacroFileSystem::ResolvePaths(ClientContext &context, const P
 	if (result->HasError()) {
 		throw IOException("pathmacro: catalog macro '%s' failed: %s", parsed.macro_name, result->GetError());
 	}
-	auto val = result->GetValue(0, 0);
+	// Fetch the single row rather than QueryResult::GetValue: v2.0 moved that accessor
+	// off QueryResult (Connection::Query no longer returns a MaterializedQueryResult),
+	// while Fetch() + DataChunk::GetValue exist on both lines -- so no version probe.
+	auto chunk = result->Fetch();
+	if (!chunk || chunk->size() == 0) {
+		throw IOException("pathmacro: catalog macro '%s' returned no rows", parsed.macro_name);
+	}
+	auto val = chunk->GetValue(0, 0);
 	if (val.IsNull()) {
 		return {};
 	}
