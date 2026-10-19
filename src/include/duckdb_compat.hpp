@@ -320,8 +320,14 @@ public:
 				d--;
 			}
 		} guard(depth);
+		// Spelled BASE::, not FileSystem::. A non-dependent call is checked when the
+		// template is DEFINED, and on v1.4 FileSystem has no CanonicalizePath, so
+		// FileSystem::GetFileSystem(...).CanonicalizePath(...) is an error there even
+		// though this specialisation is never instantiated (measured: v1.4.5
+		// -fsyntax-only). BASE:: makes the call dependent, so it is checked only on
+		// instantiation.
 		try {
-			return FileSystem::GetFileSystem(*context).CanonicalizePath(resolved);
+			return BASE::GetFileSystem(*context).CanonicalizePath(resolved);
 		} catch (...) {
 			return resolved;
 		}
