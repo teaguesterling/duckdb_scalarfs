@@ -21,10 +21,18 @@ SET VARIABLE doc = '__scalarfs_test_canon_doc.csv';
 # pathvariable: resolves to the variable's path
 # =============================================================================
 
+# Resolves to DuckDB's canonical form of the stored path -- here relative, so
+# made absolute by the local filesystem. Compared rather than spelled out, so
+# the expectation does not depend on the working directory or the OS.
 query T
-SELECT scalarfs_canonicalize_path('pathvariable:doc');
+SELECT scalarfs_canonicalize_path('pathvariable:doc') = scalarfs_canonicalize_path('__scalarfs_test_canon_doc.csv');
 ----
-__scalarfs_test_canon_doc.csv
+true
+
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:doc') LIKE '%__scalarfs_test_canon_doc.csv';
+----
+true
 
 # The point of the change: a real extension is visible after canonicalization...
 query T
@@ -62,14 +70,14 @@ statement ok
 SET VARIABLE docs_glob = '/data/notes/*.md';
 
 query T
-SELECT scalarfs_canonicalize_path('pathvariable:docs_glob');
+SELECT scalarfs_canonicalize_path('pathvariable:docs_glob') = scalarfs_canonicalize_path('/data/notes/*.md');
 ----
-/data/notes/*.md
+true
 
 # The answer follows the variable, not the plan: a prepared statement re-run
 # after SET VARIABLE must see the new value (no constant folding).
 statement ok
-PREPARE canon_doc AS SELECT scalarfs_canonicalize_path('pathvariable:doc');
+PREPARE canon_doc AS SELECT regexp_extract(scalarfs_canonicalize_path('pathvariable:doc'), '[^/\\]+$');
 
 query T
 EXECUTE canon_doc;
@@ -82,7 +90,7 @@ SET VARIABLE doc = '/data/other.json';
 query T
 EXECUTE canon_doc;
 ----
-/data/other.json
+other.json
 
 statement ok
 SET VARIABLE doc = '__scalarfs_test_canon_doc.csv';
@@ -149,6 +157,19 @@ SELECT scalarfs_canonicalize_path('pathvariable:self_ref');
 ----
 pathvariable:self_ref
 
+# Nor may two variables that point at each other. The resolution stops at a
+# depth cap and returns a scalarfs path, which the open then reports.
+statement ok
+SET VARIABLE cycle_a = 'pathvariable:cycle_b';
+
+statement ok
+SET VARIABLE cycle_b = 'pathvariable:cycle_a';
+
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:cycle_a') IN ('pathvariable:cycle_a', 'pathvariable:cycle_b');
+----
+true
+
 # =============================================================================
 # pathmacro: resolves when the allow-listed macro yields exactly one path
 # =============================================================================
@@ -174,9 +195,9 @@ statement ok
 SET allowed_pathmacros = 'canon_files';
 
 query T
-SELECT scalarfs_canonicalize_path('pathmacro:canon_files?region=west');
+SELECT scalarfs_canonicalize_path('pathmacro:canon_files?region=west') = scalarfs_canonicalize_path('/data/west.parquet');
 ----
-/data/west.parquet
+true
 
 # Two paths: no single file to name.
 query T
@@ -198,3 +219,61 @@ query T
 SELECT scalarfs_canonicalize_path('/data/./x/../doc.md');
 ----
 /data/doc.md
+
+# =============================================================================
+# ATTACH reaches the canonicalize phase with a client context
+# =============================================================================
+# With an explicit TYPE, ATTACH keeps the pathvariable: prefix and canonicalizes
+# it on the client's filesystem. Before #26 this was an INTERNAL error
+# ("writing on the OpenerFileSystem is undefined"). Now the database opens at
+# the real path, and its WAL lands beside it.
+
+statement ok
+ATTACH '__scalarfs_test_canon_attach.db' AS canon_seed;
+
+statement ok
+CREATE OR REPLACE TABLE canon_seed.t AS SELECT 1 AS a;
+
+statement ok
+DETACH canon_seed;
+
+statement ok
+SET VARIABLE canon_db = '__scalarfs_test_canon_attach.db';
+
+statement ok
+ATTACH 'pathvariable:canon_db' AS canon_x (TYPE duckdb);
+
+query T
+SELECT path = scalarfs_canonicalize_path('__scalarfs_test_canon_attach.db') FROM duckdb_databases() WHERE database_name = 'canon_x';
+----
+true
+
+statement ok
+INSERT INTO canon_x.t VALUES (2);
+
+query I
+SELECT count(*) FROM canon_x.t;
+----
+2
+
+# The safety property: one file must not be attached twice. DuckDB detects a
+# duplicate by comparing canonical paths, so the variable's RELATIVE value must
+# canonicalize to the same absolute path a plain ATTACH gets.
+statement error
+ATTACH '__scalarfs_test_canon_attach.db' AS canon_y;
+----
+already attached
+
+statement ok
+DETACH canon_x;
+
+statement ok
+ATTACH '__scalarfs_test_canon_attach.db' AS canon_plain;
+
+statement error
+ATTACH 'pathvariable:canon_db' AS canon_z (TYPE duckdb);
+----
+already attached
+
+statement ok
+DETACH canon_plain;
