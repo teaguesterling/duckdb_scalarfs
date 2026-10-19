@@ -275,4 +275,31 @@ inline string CompatCanonicalizePath(FS &fs, const string &path) {
 	return CompatCanonicalizePathImpl(fs, path, CompatHasCanonicalizePath<FS>());
 }
 
+// Declaring side. A trait cannot gate a member DECLARATION the way it gates a
+// call: an `override` written into a scalarfs class is checked when that class
+// is compiled, which on v1.4 is an error. So the override lives in a class
+// template whose base is a template parameter. The `true` specialisation is the
+// only place that says `override`. It is checked only when it is instantiated,
+// and that happens only where the probe found the method.
+//
+// Both specialisations declare the hook, so a scalarfs filesystem implements it
+// once, identically on every line. On v1.4 the hook is simply never called.
+template <class BASE, bool = CompatHasCanonicalizePath<BASE>::value>
+class CompatCanonicalizingFileSystem : public BASE {
+protected:
+	//! Resolve a path this filesystem owns to the path it names -- losslessly,
+	//! never throwing -- or return it unchanged.
+	virtual string ResolveCanonicalPath(const string &path, optional_ptr<FileOpener> opener) = 0;
+};
+template <class BASE>
+class CompatCanonicalizingFileSystem<BASE, true> : public BASE {
+public:
+	string CanonicalizePath(const string &path, optional_ptr<FileOpener> opener = nullptr) override {
+		return ResolveCanonicalPath(path, opener);
+	}
+
+protected:
+	virtual string ResolveCanonicalPath(const string &path, optional_ptr<FileOpener> opener) = 0;
+};
+
 } // namespace duckdb

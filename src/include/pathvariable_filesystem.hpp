@@ -4,6 +4,7 @@
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/open_file_info.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "duckdb_compat.hpp"
 #include "pathvariable_modifiers.hpp"
 #include <mutex>
 #include <unordered_map>
@@ -35,7 +36,7 @@ namespace duckdb {
 //   MoveFile handles the temp -> final path transition
 //
 
-class PathVariableFileSystem : public FileSystem {
+class PathVariableFileSystem : public CompatCanonicalizingFileSystem<FileSystem> {
 public:
 	// FileSystem interface
 	unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) override;
@@ -50,6 +51,14 @@ public:
 	// but the downstream file opener has no client context. Throws if the variable is
 	// missing, NULL, a list, or not VARCHAR/BLOB.
 	static string GetPathFromVariable(ClientContext &context, const string &var_name);
+
+protected:
+	// Canonicalize phase (issue #26): pathvariable:X -> the path stored in X, so a
+	// reader sees a real extension. Passes the path through unchanged unless it
+	// names exactly one file the way OpenFile would open it.
+	string ResolveCanonicalPath(const string &path, optional_ptr<FileOpener> opener) override;
+
+public:
 
 	// File operations - all delegate to parent filesystem via the handle
 	void Read(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override;

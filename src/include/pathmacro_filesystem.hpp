@@ -4,6 +4,7 @@
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/open_file_info.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "duckdb_compat.hpp"
 #include <utility>
 
 namespace duckdb {
@@ -41,7 +42,7 @@ namespace duckdb {
 //   - Param keys/values are passed as MAP *data* (escaped), never concatenated
 //     into SQL, so values carry no injection surface.
 //
-class PathMacroFileSystem : public FileSystem {
+class PathMacroFileSystem : public CompatCanonicalizingFileSystem<FileSystem> {
 public:
 	bool CanHandleFile(const string &fpath) override;
 	string GetName() const override {
@@ -90,6 +91,12 @@ public:
 	}
 	bool OnDiskFile(FileHandle &handle) override;
 	timestamp_t GetLastModifiedTime(FileHandle &handle) override;
+
+protected:
+	// Canonicalize phase (issue #26): pathmacro:m?... -> the one path the macro
+	// yields, resolved exactly as OpenFile resolves it. Passes the path through
+	// unchanged for zero or several paths, or when the macro may not run.
+	string ResolveCanonicalPath(const string &path, optional_ptr<FileOpener> opener) override;
 
 private:
 	static string EscapeSingle(const string &s); // ' -> ''
