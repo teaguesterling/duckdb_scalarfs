@@ -228,6 +228,32 @@ unique_ptr<FileHandle> PathMacroFileSystem::OpenFile(const string &path, FileOpe
 	return make_uniq<PathMacroFileHandle>(*this, path, std::move(underlying), parent_fs);
 }
 
+// Lossless or nothing -- see PathVariableFileSystem::ResolveCanonicalPath.
+// Resolves through ResolvePaths, so the allow-list gate applies here exactly as
+// it does to OpenFile: a macro that may not run is not run to canonicalize.
+string PathMacroFileSystem::ResolveCanonicalPath(const string &path, optional_ptr<FileOpener> opener) {
+	if (!CanHandleFile(path)) {
+		return path;
+	}
+	try {
+		auto context = FileOpener::TryGetClientContext(opener);
+		if (!context) {
+			return path;
+		}
+		auto parsed = Parse(path);
+		if (parsed.is_temp) {
+			return path;
+		}
+		auto paths = ResolvePaths(*context, parsed);
+		if (paths.size() != 1) {
+			return path;
+		}
+		return paths[0];
+	} catch (...) {
+		return path;
+	}
+}
+
 bool PathMacroFileSystem::FileExists(const string &filename, optional_ptr<FileOpener> opener) {
 	if (!CanHandleFile(filename)) {
 		return false;

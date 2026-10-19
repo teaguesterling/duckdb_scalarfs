@@ -350,6 +350,42 @@ from_pathmacro_url(url VARCHAR) → STRUCT(macro VARCHAR, params MAP(VARCHAR, VA
 
 - `from_pathmacro_url: '<url>' is not a pathmacro: URL (must start with 'pathmacro:')`
 
+## Path Functions
+
+### scalarfs_canonicalize_path
+
+Run a path through the session filesystem's canonicalize phase. This is the
+step a reader takes to learn a path's real extension.
+
+```sql
+scalarfs_canonicalize_path(path VARCHAR) → VARCHAR
+```
+
+A `pathvariable:` or `pathmacro:` path that names exactly one file resolves to
+that file's canonical path. Any other path is canonicalized by the filesystem
+that owns it.
+
+| Input | Output |
+|-------|--------|
+| `scalarfs_canonicalize_path('pathvariable:doc')` with `doc = 'notes/a.md'` | `'/abs/cwd/notes/a.md'` |
+| `scalarfs_canonicalize_path('pathmacro:m?region=west')`, macro yields one path | that path, canonicalized |
+| `scalarfs_canonicalize_path('/data/./x/../doc.md')` | `'/data/doc.md'` |
+
+The resolution is lossless: the result opens the same file. It never raises an
+error. The path comes back unchanged when it does not name exactly one file:
+
+- the variable is missing, NULL, a list, or not VARCHAR/BLOB
+- the path has modifiers, a glob in the variable name, or the `tmp_` prefix
+- the macro is not in `allowed_pathmacros`, or yields zero or several paths
+
+The same resolution applies wherever DuckDB canonicalizes a path. For example,
+`ATTACH 'pathvariable:v' (TYPE duckdb)` records the real file, so DuckDB
+refuses a second attach of that file.
+
+!!! note
+    Available on DuckDB v1.5 and later. DuckDB v1.4 has no canonicalize phase,
+    so the function is not registered there.
+
 ---
 
 ## Error Messages

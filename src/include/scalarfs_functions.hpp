@@ -24,6 +24,9 @@ public:
 	static ScalarFunctionSet GetToPathmacroUrlFunctions();
 	static ScalarFunction GetFromPathmacroUrlFunction();
 
+	// Expose FileSystem::CanonicalizePath to SQL (registered only where it exists)
+	static ScalarFunction GetCanonicalizePathFunction();
+
 	// Register all functions via the extension loader
 	static void Register(ExtensionLoader &loader);
 };

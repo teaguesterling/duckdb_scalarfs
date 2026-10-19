@@ -184,6 +184,35 @@ string PathVariableFileSystem::ResolvePath(const string &path, optional_ptr<File
 	return target_path;
 }
 
+// Lossless or nothing. CanonicalizePath also runs where no error is expected
+// (ATTACH, the instance cache), so a path that does not name exactly one file
+// comes back unchanged and the open that follows reports why. The stored value
+// is returned as-is; CompatCanonicalizingFileSystem then canonicalizes it
+// through its own owner, with a depth cap against self-referencing variables.
+string PathVariableFileSystem::ResolveCanonicalPath(const string &path, optional_ptr<FileOpener> opener) {
+	if (!CanHandleFile(path)) {
+		return path;
+	}
+	try {
+		auto context = FileOpener::TryGetClientContext(opener);
+		if (!context) {
+			return path;
+		}
+		auto parsed = PathVariableParser::Parse(path);
+		// Modifiers only take effect in Glob, so the open and the glob of such a
+		// path can differ; a glob on the NAME can match several variables; and
+		// tmp_pathvariable: is COPY's internal temp target, not a reader's path.
+		if (parsed.is_temp || parsed.flags != PathVariableModifierFlag::NONE || parsed.variable_name.empty() ||
+		    FileSystem::HasGlob(parsed.variable_name)) {
+			return path;
+		}
+		// Throws for a missing, NULL, list, or non-text variable.
+		return GetPathFromVariable(*context, parsed.variable_name);
+	} catch (...) {
+		return path;
+	}
+}
+
 FileSystem &PathVariableFileSystem::GetParentFileSystem(optional_ptr<FileOpener> opener) {
 	auto context = FileOpener::TryGetClientContext(opener);
 	if (!context) {
