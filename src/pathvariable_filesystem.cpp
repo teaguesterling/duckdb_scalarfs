@@ -187,8 +187,8 @@ string PathVariableFileSystem::ResolvePath(const string &path, optional_ptr<File
 // Lossless or nothing. CanonicalizePath also runs where no error is expected
 // (ATTACH, the instance cache), so a path that does not name exactly one file
 // comes back unchanged and the open that follows reports why. The stored value
-// is returned as-is, never canonicalized again: a variable holding
-// 'pathvariable:<itself>' would otherwise recurse without end.
+// is returned as-is; CompatCanonicalizingFileSystem then canonicalizes it
+// through its own owner, with a depth cap against self-referencing variables.
 string PathVariableFileSystem::ResolveCanonicalPath(const string &path, optional_ptr<FileOpener> opener) {
 	if (!CanHandleFile(path)) {
 		return path;
