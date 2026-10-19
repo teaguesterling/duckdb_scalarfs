@@ -255,8 +255,8 @@ struct CompatHasCanonicalizePath<T, decltype(void(std::declval<T &>().Canonicali
 template <class T, class = void>
 struct CompatHasCanonicalizePathOneArg : std::false_type {};
 template <class T>
-struct CompatHasCanonicalizePathOneArg<
-    T, decltype(void(std::declval<T &>().CanonicalizePath(std::declval<const string &>())))> : std::true_type {};
+struct CompatHasCanonicalizePathOneArg<T, decltype(void(std::declval<T &>().CanonicalizePath(
+                                              std::declval<const string &>())))> : std::true_type {};
 static_assert(!CompatHasCanonicalizePathOneArg<FileSystem>::value || CompatHasCanonicalizePath<FileSystem>::value,
               "FileSystem::CanonicalizePath changed shape; update the CompatHasCanonicalizePath probe");
 

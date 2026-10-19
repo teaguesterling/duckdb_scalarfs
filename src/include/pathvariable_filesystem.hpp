@@ -59,7 +59,6 @@ protected:
 	string ResolveCanonicalPath(const string &path, optional_ptr<FileOpener> opener) override;
 
 public:
-
 	// File operations - all delegate to parent filesystem via the handle
 	void Read(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override;
 	int64_t Read(FileHandle &handle, void *buffer, int64_t nr_bytes) override;
