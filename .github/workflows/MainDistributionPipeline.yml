@@ -3,7 +3,16 @@
 #
 name: Main Extension Distribution Pipeline
 on:
+  # Pushes build only on main. A push to a PR branch fires a push run AND a
+  # pull_request run for the same commit, so every ungated job here built
+  # TWICE per push: 12 duplicate jobs, 2 of them hosted macOS legs and 2
+  # hosted Windows, measured on 8506aff1f5 (push run 39142741166 and
+  # pull_request run 39142743030, same head_sha). The pull_request run is
+  # the one whose status matters. What the filter costs: a branch with no PR
+  # open gets no CI until the PR opens. Nothing here deploys on tags, and
+  # workflow_dispatch still runs on any branch.
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
