@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb.hpp"
+#include "duckdb/common/file_system.hpp"
 #include "duckdb/function/table_function.hpp"
 #include <type_traits>
 #include <utility>
@@ -226,6 +227,52 @@ inline ValidityMask &CompatFlatValidityMutableImpl(Vector &vec, std::false_type)
 template <class FV = FlatVector>
 inline ValidityMask &CompatFlatValidityMutable(Vector &vec) {
 	return CompatFlatValidityMutableImpl<FV>(vec, CompatHasFlatValidityMutable<FV>());
+}
+
+// --- FileSystem::CanonicalizePath ----------------------------------------------
+// v1.4: absent -- FileSystem has no CanonicalizePath at all
+// v1.5: virtual string CanonicalizePath(const string &, optional_ptr<FileOpener> = nullptr)
+// v2.0: same signature (file_system.hpp:397 on v2.0-cyanoptera and main)
+//
+// scalarfs ships to BOTH lines: the community registry builds the `andium` ref
+// against v1.4 and `ref` against v1.5. So nothing here may name CanonicalizePath
+// in a non-dependent context -- on v1.4 that is a hard compile error.
+//
+// PROBE FileSystem, NEVER A SCALARFS FILESYSTEM. Once a scalarfs class declares
+// its own CanonicalizePath, a probe on that class is true on every line and the
+// gate stops gating.
+template <class T, class = void>
+struct CompatHasCanonicalizePath : std::false_type {};
+template <class T>
+struct CompatHasCanonicalizePath<T, decltype(void(std::declval<T &>().CanonicalizePath(
+                                        std::declval<const string &>(), std::declval<optional_ptr<FileOpener>>())))>
+    : std::true_type {};
+
+// The two-argument probe above goes quietly false if upstream ever drops the
+// opener parameter, and the scalarfs overrides would then vanish without an
+// error. A one-argument call is valid on every line that has the method (the
+// opener defaults), so "callable with one, not with two" means the shape moved.
+template <class T, class = void>
+struct CompatHasCanonicalizePathOneArg : std::false_type {};
+template <class T>
+struct CompatHasCanonicalizePathOneArg<
+    T, decltype(void(std::declval<T &>().CanonicalizePath(std::declval<const string &>())))> : std::true_type {};
+static_assert(!CompatHasCanonicalizePathOneArg<FileSystem>::value || CompatHasCanonicalizePath<FileSystem>::value,
+              "FileSystem::CanonicalizePath changed shape; update the CompatHasCanonicalizePath probe");
+
+// Calling side. Where the method is absent there is no canonicalize phase to
+// take part in, so the path is returned as given.
+template <class FS>
+inline string CompatCanonicalizePathImpl(FS &fs, const string &path, std::true_type) {
+	return fs.CanonicalizePath(path);
+}
+template <class FS>
+inline string CompatCanonicalizePathImpl(FS &, const string &path, std::false_type) {
+	return path;
+}
+template <class FS = FileSystem>
+inline string CompatCanonicalizePath(FS &fs, const string &path) {
+	return CompatCanonicalizePathImpl(fs, path, CompatHasCanonicalizePath<FS>());
 }
 
 } // namespace duckdb
