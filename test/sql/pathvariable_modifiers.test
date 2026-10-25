@@ -255,6 +255,34 @@ SELECT file FROM glob('pathvariable:no-glob:no-scalarfs:append:scalarfs_mixed!/s
 data+varchar:content
 variable:some_var
 
+# no-scalarfs covers EVERY scalarfs protocol, not only the first five: a
+# suffix glued onto pathmacro:, decompress+ or a tmp_ form breaks that URL the
+# same way, and is_scalarfs_uri() says all of them are scalarfs paths.
+statement ok
+SET VARIABLE scalarfs_all = ['pathmacro:m?k=v', 'tmp_pathmacro:m', 'decompress+gz:x.gz', 'decompress+zstd:x.zst', 'tmp_variable:v', 'tmp_pathvariable:v', '/local/file.csv'];
+
+query II
+SELECT file, is_scalarfs_uri(file) FROM glob('pathvariable:no-glob:no-scalarfs:append:scalarfs_all!/suffix') ORDER BY file;
+----
+/local/file.csv/suffix	false
+decompress+gz:x.gz	true
+decompress+zstd:x.zst	true
+pathmacro:m?k=v	true
+tmp_pathmacro:m	true
+tmp_pathvariable:v	true
+tmp_variable:v	true
+
+query I
+SELECT file FROM glob('pathvariable:no-glob:no-scalarfs:prepend:scalarfs_all!/base') ORDER BY file;
+----
+/base/local/file.csv
+decompress+gz:x.gz
+decompress+zstd:x.zst
+pathmacro:m?k=v
+tmp_pathmacro:m
+tmp_pathvariable:v
+tmp_variable:v
+
 # =============================================================================
 # no-protocols modifier - don't modify paths with explicit protocols
 # =============================================================================
