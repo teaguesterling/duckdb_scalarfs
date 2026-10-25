@@ -1,6 +1,8 @@
 #pragma once
 
 #include "duckdb.hpp"
+#include "duckdb/common/file_opener.hpp"
+#include "duckdb/common/file_system.hpp"
 #include "duckdb/function/table_function.hpp"
 #include <type_traits>
 #include <utility>
@@ -227,5 +229,115 @@ template <class FV = FlatVector>
 inline ValidityMask &CompatFlatValidityMutable(Vector &vec) {
 	return CompatFlatValidityMutableImpl<FV>(vec, CompatHasFlatValidityMutable<FV>());
 }
+
+// --- FileSystem::CanonicalizePath ----------------------------------------------
+// v1.4: absent -- FileSystem has no CanonicalizePath at all
+// v1.5: virtual string CanonicalizePath(const string &, optional_ptr<FileOpener> = nullptr)
+// v2.0: same signature (file_system.hpp:397 on v2.0-cyanoptera and main)
+//
+// scalarfs ships to BOTH lines: the community registry builds the `andium` ref
+// against v1.4 and `ref` against v1.5. So nothing here may name CanonicalizePath
+// in a non-dependent context -- on v1.4 that is a hard compile error.
+//
+// PROBE FileSystem, NEVER A SCALARFS FILESYSTEM. Once a scalarfs class declares
+// its own CanonicalizePath, a probe on that class is true on every line and the
+// gate stops gating.
+template <class T, class = void>
+struct CompatHasCanonicalizePath : std::false_type {};
+template <class T>
+struct CompatHasCanonicalizePath<T, decltype(void(std::declval<T &>().CanonicalizePath(
+                                        std::declval<const string &>(), std::declval<optional_ptr<FileOpener>>())))>
+    : std::true_type {};
+
+// The two-argument probe above goes quietly false if upstream ever drops the
+// opener parameter, and the scalarfs overrides would then vanish without an
+// error. A one-argument call is valid on every line that has the method (the
+// opener defaults), so "callable with one, not with two" means the shape moved.
+template <class T, class = void>
+struct CompatHasCanonicalizePathOneArg : std::false_type {};
+template <class T>
+struct CompatHasCanonicalizePathOneArg<T, decltype(void(std::declval<T &>().CanonicalizePath(
+                                              std::declval<const string &>())))> : std::true_type {};
+static_assert(!CompatHasCanonicalizePathOneArg<FileSystem>::value || CompatHasCanonicalizePath<FileSystem>::value,
+              "FileSystem::CanonicalizePath changed shape; update the CompatHasCanonicalizePath probe");
+
+// Calling side. Where the method is absent there is no canonicalize phase to
+// take part in, so the path is returned as given.
+template <class FS>
+inline string CompatCanonicalizePathImpl(FS &fs, const string &path, std::true_type) {
+	return fs.CanonicalizePath(path);
+}
+template <class FS>
+inline string CompatCanonicalizePathImpl(FS &, const string &path, std::false_type) {
+	return path;
+}
+template <class FS = FileSystem>
+inline string CompatCanonicalizePath(FS &fs, const string &path) {
+	return CompatCanonicalizePathImpl(fs, path, CompatHasCanonicalizePath<FS>());
+}
+
+// Declaring side. A trait cannot gate a member DECLARATION the way it gates a
+// call: an `override` written into a scalarfs class is checked when that class
+// is compiled, which on v1.4 is an error. So the override lives in a class
+// template whose base is a template parameter. The `true` specialisation is the
+// only place that says `override`. It is checked only when it is instantiated,
+// and that happens only where the probe found the method.
+//
+// Both specialisations declare the hook, so a scalarfs filesystem implements it
+// once, identically on every line. On v1.4 the hook is simply never called.
+template <class BASE, bool = CompatHasCanonicalizePath<BASE>::value>
+class CompatCanonicalizingFileSystem : public BASE {
+protected:
+	//! Resolve a path this filesystem owns to the path it names -- losslessly,
+	//! never throwing -- or return it unchanged.
+	virtual string ResolveCanonicalPath(const string &path, optional_ptr<FileOpener> opener) = 0;
+};
+template <class BASE>
+class CompatCanonicalizingFileSystem<BASE, true> : public BASE {
+public:
+	string CanonicalizePath(const string &path, optional_ptr<FileOpener> opener = nullptr) override {
+		auto resolved = ResolveCanonicalPath(path, opener);
+		auto context = FileOpener::TryGetClientContext(opener);
+		if (resolved == path || !context) {
+			return resolved;
+		}
+		// The resolved path is canonicalized by ITS owner too. A stored value is
+		// often relative ('t.db'), and DuckDB compares canonical paths to refuse a
+		// second ATTACH of a file that is already attached. Returning 't.db' while
+		// a plain ATTACH 't.db' yields '/abs/t.db' let the same file be attached
+		// twice (measured). The depth cap stops a chain of scalarfs paths that
+		// loops back on itself; at the cap the path is returned as resolved so far.
+		static thread_local idx_t depth = 0;
+		if (depth >= MAX_CANONICALIZE_DEPTH) {
+			return resolved;
+		}
+		struct DepthGuard {
+			idx_t &d;
+			explicit DepthGuard(idx_t &d_p) : d(d_p) {
+				d++;
+			}
+			~DepthGuard() {
+				d--;
+			}
+		} guard(depth);
+		// Spelled BASE::, not FileSystem::. A non-dependent call is checked when the
+		// template is DEFINED, and on v1.4 FileSystem has no CanonicalizePath, so
+		// FileSystem::GetFileSystem(...).CanonicalizePath(...) is an error there even
+		// though this specialisation is never instantiated (measured: v1.4.5
+		// -fsyntax-only). BASE:: makes the call dependent, so it is checked only on
+		// instantiation.
+		try {
+			return BASE::GetFileSystem(*context).CanonicalizePath(resolved);
+		} catch (...) {
+			return resolved;
+		}
+	}
+
+protected:
+	virtual string ResolveCanonicalPath(const string &path, optional_ptr<FileOpener> opener) = 0;
+
+private:
+	static constexpr idx_t MAX_CANONICALIZE_DEPTH = 8;
+};
 
 } // namespace duckdb

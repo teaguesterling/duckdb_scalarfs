@@ -1,7 +1,9 @@
 #include "scalarfs_functions.hpp"
+#include "duckdb_compat.hpp"
 #include "string_encodings.hpp"
 #include "pathmacro_filesystem.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/file_system.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/common/types/blob.hpp"
 #include "duckdb/common/types/value.hpp"
@@ -306,6 +308,17 @@ static void FromScalarfsUriFunction(DataChunk &args, ExpressionState &state, Vec
 	});
 }
 
+// Runs a path through the session filesystem's canonicalize phase -- the step a
+// reader takes to learn a path's real extension (issue #26). The session
+// filesystem carries this client's opener, so pathvariable:/pathmacro: can see
+// the variables and macros they resolve against.
+static void ScalarfsCanonicalizePathFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &fs = FileSystem::GetFileSystem(state.GetContext());
+	UnaryExecutor::Execute<string_t, string_t>(args.data[0], result, args.size(), [&](string_t input) {
+		return StringVector::AddString(result, CompatCanonicalizePath(fs, input.GetString()));
+	});
+}
+
 // =============================================================================
 // Function definitions
 // =============================================================================
@@ -394,6 +407,16 @@ ScalarFunction ScalarfsFunctions::GetFromPathmacroUrlFunction() {
 	fn.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
 	// Rejects a URL that is not a pathmacro: URL.
 	fn.SetFallible();
+	return fn;
+}
+
+ScalarFunction ScalarfsFunctions::GetCanonicalizePathFunction() {
+	ScalarFunction fn("scalarfs_canonicalize_path", {LogicalType::VARCHAR}, LogicalType::VARCHAR,
+	                  ScalarfsCanonicalizePathFunction);
+	// The answer depends on session variables and macros, so it must not be
+	// constant-folded into a plan that outlives them (e.g. a prepared statement
+	// re-executed after SET VARIABLE).
+	fn.SetStability(FunctionStability::CONSISTENT_WITHIN_QUERY);
 	return fn;
 }
 
@@ -595,6 +618,25 @@ void ScalarfsFunctions::Register(ExtensionLoader &loader) {
 		desc.description = "Parse a pathmacro: URL into a struct containing macro name and parameters map.";
 		desc.examples = {"from_pathmacro_url('pathmacro:my_macro?key=val')"};
 		desc.categories = {"scalarfs", "pathmacro"};
+		info.descriptions.push_back(desc);
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// scalarfs_canonicalize_path -- only where DuckDB has a canonicalize phase.
+	// On a line without FileSystem::CanonicalizePath it could only echo its input,
+	// which would pass for "resolution found nothing" and hide the real reason.
+	if (CompatHasCanonicalizePath<FileSystem>::value) {
+		CreateScalarFunctionInfo info(GetCanonicalizePathFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc;
+		desc.parameter_names = {"path"};
+		desc.description = "Canonicalize a path through the session filesystem. pathvariable: and pathmacro: "
+		                   "paths that name exactly one file resolve to that file's path; any other path is "
+		                   "canonicalized by the filesystem that owns it.";
+		desc.examples = {"scalarfs_canonicalize_path('pathvariable:doc')"};
+		desc.categories = {"scalarfs", "pathvariable", "pathmacro"};
 		info.descriptions.push_back(desc);
 
 		loader.RegisterFunction(std::move(info));

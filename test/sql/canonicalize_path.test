@@ -1,0 +1,282 @@
+# name: test/sql/canonicalize_path.test
+# description: pathvariable: and pathmacro: resolve in DuckDB's canonicalize phase (issue #26)
+# group: [sql]
+
+require scalarfs
+
+# WHY: readers decide what they can open from a path's extension, and a
+# pathvariable:/pathmacro: URL carries none. Canonicalizing to the underlying
+# path gives a reader a real extension -- so it can accept a .md AND refuse a
+# .png. The resolution must be LOSSLESS: the canonical path opens the same file.
+# Wherever resolution is not a single, certain file, the path passes through
+# unchanged and the normal open path reports any error.
+
+statement ok
+COPY (SELECT 1 AS a, 'x' AS b) TO '__scalarfs_test_canon_doc.csv' (FORMAT csv, HEADER true);
+
+statement ok
+SET VARIABLE doc = '__scalarfs_test_canon_doc.csv';
+
+# =============================================================================
+# pathvariable: resolves to the variable's path
+# =============================================================================
+
+# Resolves to DuckDB's canonical form of the stored path -- here relative, so
+# made absolute by the local filesystem. Compared rather than spelled out, so
+# the expectation does not depend on the working directory or the OS.
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:doc') = scalarfs_canonicalize_path('__scalarfs_test_canon_doc.csv');
+----
+true
+
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:doc') LIKE '%__scalarfs_test_canon_doc.csv';
+----
+true
+
+# The point of the change: a real extension is visible after canonicalization...
+query T
+SELECT regexp_extract(scalarfs_canonicalize_path('pathvariable:doc'), '\.([a-z]+)$', 1);
+----
+csv
+
+# ...including one a reader must REFUSE, which no extension-less fallback can tell.
+statement ok
+SET VARIABLE img = '/data/picture.png';
+
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:img') LIKE '%.png';
+----
+true
+
+# Lossless: reading the canonical path gives the same rows as reading the URL.
+statement ok
+SET VARIABLE canon = scalarfs_canonicalize_path('pathvariable:doc');
+
+query IT
+SELECT * FROM read_csv(getvariable('canon'))
+EXCEPT ALL
+SELECT * FROM read_csv('pathvariable:doc');
+----
+
+query I
+SELECT count(*) FROM read_csv(getvariable('canon'));
+----
+1
+
+# A glob stored in the variable is still its value: Glob('pathvariable:x')
+# expands exactly that pattern, so returning it names the same file set.
+statement ok
+SET VARIABLE docs_glob = '/data/notes/*.md';
+
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:docs_glob') = scalarfs_canonicalize_path('/data/notes/*.md');
+----
+true
+
+# The answer follows the variable, not the plan: a prepared statement re-run
+# after SET VARIABLE must see the new value (no constant folding).
+statement ok
+PREPARE canon_doc AS SELECT regexp_extract(scalarfs_canonicalize_path('pathvariable:doc'), '[^/\\]+$');
+
+query T
+EXECUTE canon_doc;
+----
+__scalarfs_test_canon_doc.csv
+
+statement ok
+SET VARIABLE doc = '/data/other.json';
+
+query T
+EXECUTE canon_doc;
+----
+other.json
+
+statement ok
+SET VARIABLE doc = '__scalarfs_test_canon_doc.csv';
+
+# =============================================================================
+# pathvariable: passes through unchanged when it does not name one file
+# =============================================================================
+
+# Missing variable -- canonicalize must not throw; the open reports it.
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:no_such_variable');
+----
+pathvariable:no_such_variable
+
+statement ok
+SET VARIABLE null_path = NULL;
+
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:null_path');
+----
+pathvariable:null_path
+
+statement ok
+SET VARIABLE int_path = 42;
+
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:int_path');
+----
+pathvariable:int_path
+
+# A list names many files; there is no one path to return.
+statement ok
+SET VARIABLE many = ['/data/a.csv', '/data/b.csv'];
+
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:many');
+----
+pathvariable:many
+
+# Modifiers change what Glob returns; dropping them would not be lossless.
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:search:doc');
+----
+pathvariable:search:doc
+
+# A glob on the variable NAME can match several variables.
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:do*');
+----
+pathvariable:do*
+
+# COPY's temp-file form is an internal path, not a resource a reader names.
+query T
+SELECT scalarfs_canonicalize_path('tmp_pathvariable:doc');
+----
+tmp_pathvariable:doc
+
+# A variable that points at itself must not recurse.
+statement ok
+SET VARIABLE self_ref = 'pathvariable:self_ref';
+
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:self_ref');
+----
+pathvariable:self_ref
+
+# Nor may two variables that point at each other. The resolution stops at a
+# depth cap and returns a scalarfs path, which the open then reports.
+statement ok
+SET VARIABLE cycle_a = 'pathvariable:cycle_b';
+
+statement ok
+SET VARIABLE cycle_b = 'pathvariable:cycle_a';
+
+query T
+SELECT scalarfs_canonicalize_path('pathvariable:cycle_a') IN ('pathvariable:cycle_a', 'pathvariable:cycle_b');
+----
+true
+
+# =============================================================================
+# pathmacro: resolves when the allow-listed macro yields exactly one path
+# =============================================================================
+
+statement ok
+CREATE TABLE canon_catalog AS
+  SELECT 'west' AS region, '/data/west.parquet' AS file_path
+  UNION ALL SELECT 'east', '/data/east_1.parquet'
+  UNION ALL SELECT 'east', '/data/east_2.parquet';
+
+statement ok
+CREATE MACRO canon_files(params) AS (
+  SELECT list(file_path ORDER BY file_path) FROM canon_catalog WHERE region = CAST(params['region'] AS VARCHAR)
+);
+
+# Not allow-listed: the macro must not run, so the path passes through.
+query T
+SELECT scalarfs_canonicalize_path('pathmacro:canon_files?region=west');
+----
+pathmacro:canon_files?region=west
+
+statement ok
+SET allowed_pathmacros = 'canon_files';
+
+query T
+SELECT scalarfs_canonicalize_path('pathmacro:canon_files?region=west') = scalarfs_canonicalize_path('/data/west.parquet');
+----
+true
+
+# Two paths: no single file to name.
+query T
+SELECT scalarfs_canonicalize_path('pathmacro:canon_files?region=east');
+----
+pathmacro:canon_files?region=east
+
+# Zero paths.
+query T
+SELECT scalarfs_canonicalize_path('pathmacro:canon_files?region=north');
+----
+pathmacro:canon_files?region=north
+
+# =============================================================================
+# Paths scalarfs does not own keep DuckDB's own canonicalization
+# =============================================================================
+
+# The exact form is DuckDB's and differs by OS (Linux gives /data/doc.md,
+# Windows gives //data/./x/../doc.md), so only check that scalarfs passed it on.
+query T
+SELECT p LIKE '%doc.md' AND p NOT LIKE '%pathvariable:%' AND p NOT LIKE '%pathmacro:%'
+FROM (SELECT scalarfs_canonicalize_path('/data/./x/../doc.md') AS p);
+----
+true
+
+# =============================================================================
+# ATTACH reaches the canonicalize phase with a client context
+# =============================================================================
+# With an explicit TYPE, ATTACH keeps the pathvariable: prefix and canonicalizes
+# it on the client's filesystem. Before #26 this was an INTERNAL error
+# ("writing on the OpenerFileSystem is undefined"). Now the database opens at
+# the real path, and its WAL lands beside it.
+
+statement ok
+ATTACH '__scalarfs_test_canon_attach.db' AS canon_seed;
+
+statement ok
+CREATE OR REPLACE TABLE canon_seed.t AS SELECT 1 AS a;
+
+statement ok
+DETACH canon_seed;
+
+statement ok
+SET VARIABLE canon_db = '__scalarfs_test_canon_attach.db';
+
+statement ok
+ATTACH 'pathvariable:canon_db' AS canon_x (TYPE duckdb);
+
+query T
+SELECT path = scalarfs_canonicalize_path('__scalarfs_test_canon_attach.db') FROM duckdb_databases() WHERE database_name = 'canon_x';
+----
+true
+
+statement ok
+INSERT INTO canon_x.t VALUES (2);
+
+query I
+SELECT count(*) FROM canon_x.t;
+----
+2
+
+# The safety property: one file must not be attached twice. DuckDB detects a
+# duplicate by comparing canonical paths, so the variable's RELATIVE value must
+# canonicalize to the same absolute path a plain ATTACH gets.
+statement error
+ATTACH '__scalarfs_test_canon_attach.db' AS canon_y;
+----
+already attached
+
+statement ok
+DETACH canon_x;
+
+statement ok
+ATTACH '__scalarfs_test_canon_attach.db' AS canon_plain;
+
+statement error
+ATTACH 'pathvariable:canon_db' AS canon_z (TYPE duckdb);
+----
+already attached
+
+statement ok
+DETACH canon_plain;
