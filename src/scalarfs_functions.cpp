@@ -337,16 +337,19 @@ static void IsDataUriFunction(DataChunk &args, ExpressionState &state, Vector &r
 // before it. Only asked of paths a scalarfs filesystem claims: for any other
 // path (C:\x, s3://...) the text before ':' is not a scalarfs protocol.
 static void ScalarfsProtocolFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+	// Row-wise Value loop, like the pathmacro functions above: v2.0 removed
+	// UnaryExecutor::ExecuteWithNulls, and this form builds on both lines.
 	ScalarfsRouters routers;
-	UnaryExecutor::ExecuteWithNulls<string_t, string_t>(
-	    args.data[0], result, args.size(), [&](string_t input, ValidityMask &mask, idx_t idx) {
-		    auto path = input.GetString();
-		    if (!routers.Owns(path)) {
-			    mask.SetInvalid(idx);
-			    return string_t();
-		    }
-		    return StringVector::AddString(result, path.substr(0, path.find(':')));
-	    });
+	auto count = args.size();
+	for (idx_t row = 0; row < count; row++) {
+		Value pv = args.data[0].GetValue(row);
+		if (pv.IsNull() || !routers.Owns(StringValue::Get(pv))) {
+			result.SetValue(row, Value(LogicalType::VARCHAR));
+			continue;
+		}
+		auto &path = StringValue::Get(pv);
+		result.SetValue(row, Value(path.substr(0, path.find(':'))));
+	}
 }
 
 // =============================================================================
