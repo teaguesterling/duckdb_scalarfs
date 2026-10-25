@@ -2,10 +2,8 @@
 #include "duckdb_compat.hpp"
 #include "string_encodings.hpp"
 #include "data_uri_filesystem.hpp"
-#include "decompress_filesystem.hpp"
 #include "pathmacro_filesystem.hpp"
-#include "pathvariable_filesystem.hpp"
-#include "variable_filesystem.hpp"
+#include "scalarfs_routers.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -322,23 +320,6 @@ static void ScalarfsCanonicalizePathFunction(DataChunk &args, ExpressionState &s
 		return StringVector::AddString(result, CompatCanonicalizePath(fs, input.GetString()));
 	});
 }
-
-// The filesystems scalarfs registers (LoadInternal in scalarfs_extension.cpp).
-// The URI helpers (issue #4) ask their CanHandleFile rather than keep a prefix
-// list of their own, so they cannot disagree with the routing that opens a file.
-// None of these holds state that CanHandleFile reads; one set per chunk is cheap.
-struct ScalarfsRouters {
-	DataURIFileSystem data;
-	VariableFileSystem variable;
-	PathVariableFileSystem pathvariable;
-	PathMacroFileSystem pathmacro;
-	DecompressFileSystem decompress;
-
-	bool Owns(const string &path) {
-		return data.CanHandleFile(path) || variable.CanHandleFile(path) || pathvariable.CanHandleFile(path) ||
-		       pathmacro.CanHandleFile(path) || decompress.CanHandleFile(path);
-	}
-};
 
 static void IsScalarfsUriFunction(DataChunk &args, ExpressionState &state, Vector &result) {
 	ScalarfsRouters routers;
