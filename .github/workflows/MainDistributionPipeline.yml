@@ -42,12 +42,44 @@ jobs:
   # only name/needs/if/permissions/uses/with/secrets/strategy/concurrency, and
   # adding continue-on-error makes the whole workflow fail to PARSE (zero jobs
   # scheduled, run marked failed).
+  #
+  # The branch is resolved to a (commit, version) PAIR in the job below, not passed
+  # as `duckdb_version: v2.0-cyanoptera`. extension-ci-tools@main links a prebuilt
+  # libduckdb from duckdb-staging whenever one exists for the commit, and that
+  # library reports its staged version (v2.0.1-alpha50125 at bb5bdadda4). A branch
+  # name or SHA in duckdb_version gets stamped into the extension instead, the
+  # loader refuses it ("built specifically for DuckDB version 'v2.0-cyanoptera'"),
+  # and `require scalarfs` fails every test (pull_request run 40213743108).
+  # ci_phase.py only uses DUCKDB_VERSION verbatim when it is version-shaped, so
+  # the resolver refuses anything else rather than reintroduce the mismatch.
+  duckdb-next-ref:
+    name: Next-line build — resolve DuckDB v2.0
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.resolve.outputs.commit }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - id: resolve
+        run: |
+          commit=$(git ls-remote https://github.com/duckdb/duckdb.git refs/heads/v2.0-cyanoptera | cut -f1)
+          [ -n "$commit" ] || { echo "::error::could not resolve duckdb v2.0-cyanoptera"; exit 1; }
+          version=$(curl -sSfL "https://duckdb-staging.duckdb.org/${commit:0:10}/latest_alpha_version.txt" | tr -d '[:space:]') || version=
+          if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|rc|dev)[0-9]+)?$ ]]; then
+            echo "::error::no staged DuckDB version for v2.0-cyanoptera at $commit (got '$version')"
+            exit 1
+          fi
+          echo "v2.0-cyanoptera -> $commit, version $version"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   duckdb-next-build:
     name: Next-line build — DuckDB v2.0
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    needs: duckdb-next-ref
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
     with:
-      duckdb_version: v2.0-cyanoptera
+      duckdb_version: ${{ needs.duckdb-next-ref.outputs.version }}
+      duckdb_commit: ${{ needs.duckdb-next-ref.outputs.commit }}
       ci_tools_version: main
       extension_name: scalarfs
 
