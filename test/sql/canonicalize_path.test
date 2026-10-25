@@ -215,10 +215,13 @@ pathmacro:canon_files?region=north
 # Paths scalarfs does not own keep DuckDB's own canonicalization
 # =============================================================================
 
+# The exact form is DuckDB's and differs by OS (Linux gives /data/doc.md,
+# Windows gives //data/./x/../doc.md), so only check that scalarfs passed it on.
 query T
-SELECT scalarfs_canonicalize_path('/data/./x/../doc.md');
+SELECT p LIKE '%doc.md' AND p NOT LIKE '%pathvariable:%' AND p NOT LIKE '%pathmacro:%'
+FROM (SELECT scalarfs_canonicalize_path('/data/./x/../doc.md') AS p);
 ----
-/data/doc.md
+true
 
 # =============================================================================
 # ATTACH reaches the canonicalize phase with a client context
