@@ -24,6 +24,11 @@ public:
 	static ScalarFunctionSet GetToPathmacroUrlFunctions();
 	static ScalarFunction GetFromPathmacroUrlFunction();
 
+	// Protocol detection: does scalarfs open this path, and through which protocol?
+	static ScalarFunction GetIsScalarfsUriFunction();
+	static ScalarFunction GetIsDataUriFunction();
+	static ScalarFunction GetScalarfsProtocolFunction();
+
 	// Expose FileSystem::CanonicalizePath to SQL (registered only where it exists)
 	static ScalarFunction GetCanonicalizePathFunction();
 

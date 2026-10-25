@@ -23,6 +23,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto &db = loader.GetDatabaseInstance();
 	auto &fs = FileSystem::GetFileSystem(db);
 
+	// A filesystem added here must also join ScalarfsRouters (scalarfs_functions.cpp),
+	// or is_scalarfs_uri()/scalarfs_protocol() will not recognise its paths.
+
 	// Register the data URI filesystem (handles data:, data+varchar:, data+blob:)
 	fs.RegisterSubSystem(make_uniq<DataURIFileSystem>());
 

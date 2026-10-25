@@ -1,7 +1,11 @@
 #include "scalarfs_functions.hpp"
 #include "duckdb_compat.hpp"
 #include "string_encodings.hpp"
+#include "data_uri_filesystem.hpp"
+#include "decompress_filesystem.hpp"
 #include "pathmacro_filesystem.hpp"
+#include "pathvariable_filesystem.hpp"
+#include "variable_filesystem.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -319,6 +323,51 @@ static void ScalarfsCanonicalizePathFunction(DataChunk &args, ExpressionState &s
 	});
 }
 
+// The filesystems scalarfs registers (LoadInternal in scalarfs_extension.cpp).
+// The URI helpers (issue #4) ask their CanHandleFile rather than keep a prefix
+// list of their own, so they cannot disagree with the routing that opens a file.
+// None of these holds state that CanHandleFile reads; one set per chunk is cheap.
+struct ScalarfsRouters {
+	DataURIFileSystem data;
+	VariableFileSystem variable;
+	PathVariableFileSystem pathvariable;
+	PathMacroFileSystem pathmacro;
+	DecompressFileSystem decompress;
+
+	bool Owns(const string &path) {
+		return data.CanHandleFile(path) || variable.CanHandleFile(path) || pathvariable.CanHandleFile(path) ||
+		       pathmacro.CanHandleFile(path) || decompress.CanHandleFile(path);
+	}
+};
+
+static void IsScalarfsUriFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+	ScalarfsRouters routers;
+	UnaryExecutor::Execute<string_t, bool>(args.data[0], result, args.size(),
+	                                       [&](string_t input) { return routers.Owns(input.GetString()); });
+}
+
+static void IsDataUriFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+	DataURIFileSystem data;
+	UnaryExecutor::Execute<string_t, bool>(args.data[0], result, args.size(),
+	                                       [&](string_t input) { return data.CanHandleFile(input.GetString()); });
+}
+
+// Every scalarfs prefix ends at its first ':', so the protocol is the text
+// before it. Only asked of paths a scalarfs filesystem claims: for any other
+// path (C:\x, s3://...) the text before ':' is not a scalarfs protocol.
+static void ScalarfsProtocolFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+	ScalarfsRouters routers;
+	UnaryExecutor::ExecuteWithNulls<string_t, string_t>(
+	    args.data[0], result, args.size(), [&](string_t input, ValidityMask &mask, idx_t idx) {
+		    auto path = input.GetString();
+		    if (!routers.Owns(path)) {
+			    mask.SetInvalid(idx);
+			    return string_t();
+		    }
+		    return StringVector::AddString(result, path.substr(0, path.find(':')));
+	    });
+}
+
 // =============================================================================
 // Function definitions
 // =============================================================================
@@ -418,6 +467,18 @@ ScalarFunction ScalarfsFunctions::GetCanonicalizePathFunction() {
 	// re-executed after SET VARIABLE).
 	fn.SetStability(FunctionStability::CONSISTENT_WITHIN_QUERY);
 	return fn;
+}
+
+ScalarFunction ScalarfsFunctions::GetIsScalarfsUriFunction() {
+	return ScalarFunction("is_scalarfs_uri", {LogicalType::VARCHAR}, LogicalType::BOOLEAN, IsScalarfsUriFunction);
+}
+
+ScalarFunction ScalarfsFunctions::GetIsDataUriFunction() {
+	return ScalarFunction("is_data_uri", {LogicalType::VARCHAR}, LogicalType::BOOLEAN, IsDataUriFunction);
+}
+
+ScalarFunction ScalarfsFunctions::GetScalarfsProtocolFunction() {
+	return ScalarFunction("scalarfs_protocol", {LogicalType::VARCHAR}, LogicalType::VARCHAR, ScalarfsProtocolFunction);
 }
 
 void ScalarfsFunctions::Register(ExtensionLoader &loader) {
@@ -618,6 +679,49 @@ void ScalarfsFunctions::Register(ExtensionLoader &loader) {
 		desc.description = "Parse a pathmacro: URL into a struct containing macro name and parameters map.";
 		desc.examples = {"from_pathmacro_url('pathmacro:my_macro?key=val')"};
 		desc.categories = {"scalarfs", "pathmacro"};
+		info.descriptions.push_back(desc);
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// is_scalarfs_uri / is_data_uri / scalarfs_protocol (issue #4)
+	{
+		CreateScalarFunctionInfo info(GetIsScalarfsUriFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc;
+		desc.parameter_names = {"path"};
+		desc.description = "True if scalarfs opens the path: data:, data+varchar:, data+blob:, variable:, "
+		                   "pathvariable:, pathmacro:, decompress+gz:, decompress+zstd: (and their tmp_ forms).";
+		desc.examples = {"is_scalarfs_uri('variable:my_var')"};
+		desc.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc);
+
+		loader.RegisterFunction(std::move(info));
+	}
+	{
+		CreateScalarFunctionInfo info(GetIsDataUriFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc;
+		desc.parameter_names = {"path"};
+		desc.description = "True if the path carries its content inline: data:, data+varchar: or data+blob:.";
+		desc.examples = {"is_data_uri('data+varchar:hello')"};
+		desc.categories = {"scalarfs", "uri"};
+		info.descriptions.push_back(desc);
+
+		loader.RegisterFunction(std::move(info));
+	}
+	{
+		CreateScalarFunctionInfo info(GetScalarfsProtocolFunction());
+		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+
+		FunctionDescription desc;
+		desc.parameter_names = {"path"};
+		desc.description = "The scalarfs protocol of a path, without the colon (e.g. 'data+varchar', "
+		                   "'tmp_variable'), or NULL if scalarfs does not open the path.";
+		desc.examples = {"scalarfs_protocol('data+varchar:hello')"};
+		desc.categories = {"scalarfs", "uri"};
 		info.descriptions.push_back(desc);
 
 		loader.RegisterFunction(std::move(info));
