@@ -1,0 +1,130 @@
+# name: test/sql/scalarfs_uri_helpers.test
+# description: is_scalarfs_uri(), is_data_uri(), scalarfs_protocol() (issue #4)
+# group: [sql]
+
+require scalarfs
+
+# WHY: these helpers answer "would scalarfs open this path?" for code that
+# branches on a storage reference. The answer must agree with the routing that
+# actually opens the file -- every protocol scalarfs registers, and nothing it
+# does not -- or a caller's CASE takes the wrong branch silently.
+
+# =============================================================================
+# The issue's examples
+# =============================================================================
+
+query IIII
+SELECT is_scalarfs_uri('data+varchar:hello'), is_scalarfs_uri('variable:my_var'),
+       is_scalarfs_uri('s3://bucket/file.txt'), is_scalarfs_uri('/local/path/file.txt');
+----
+true	true	false	false
+
+query II
+SELECT is_data_uri('data+varchar:hello'), is_data_uri('variable:my_var');
+----
+true	false
+
+query III
+SELECT scalarfs_protocol('data+varchar:hello'), scalarfs_protocol('variable:x'), scalarfs_protocol('s3://bucket/file');
+----
+data+varchar	variable	NULL
+
+# =============================================================================
+# Every protocol scalarfs routes, including the tmp_ forms COPY writes through
+# =============================================================================
+
+query TTII
+SELECT p, scalarfs_protocol(p), is_scalarfs_uri(p), is_data_uri(p)
+FROM (VALUES
+    ('data:,hi'), ('data+varchar:hi'), ('data+blob:hi'),
+    ('variable:v'), ('tmp_variable:v'),
+    ('pathvariable:v'), ('tmp_pathvariable:v'),
+    ('pathmacro:m?k=v'), ('tmp_pathmacro:m'),
+    ('decompress+gz:x.gz'), ('decompress+zstd:x.zst')
+) t(p)
+ORDER BY p;
+----
+data+blob:hi	data+blob	true	true
+data+varchar:hi	data+varchar	true	true
+data:,hi	data	true	true
+decompress+gz:x.gz	decompress+gz	true	false
+decompress+zstd:x.zst	decompress+zstd	true	false
+pathmacro:m?k=v	pathmacro	true	false
+pathvariable:v	pathvariable	true	false
+tmp_pathmacro:m	tmp_pathmacro	true	false
+tmp_pathvariable:v	tmp_pathvariable	true	false
+tmp_variable:v	tmp_variable	true	false
+variable:v	variable	true	false
+
+# The protocol is the prefix, even when the rest of the path has colons of its own.
+query TT
+SELECT scalarfs_protocol('decompress+gz:s3://bucket/x.gz'), scalarfs_protocol('data:text/plain;charset=utf-8,a:b');
+----
+decompress+gz	data
+
+# =============================================================================
+# Paths scalarfs does not own
+# =============================================================================
+
+query TII
+SELECT p, is_scalarfs_uri(p), is_data_uri(p)
+FROM (VALUES
+    ('s3://bucket/x'), ('/local/x'), ('C:\x\y.csv'), ('file:hash/hash--cmd.bin'),
+    (''), ('variable'), ('data'), ('xvariable:v')
+) t(p)
+ORDER BY p;
+----
+(empty)	false	false
+/local/x	false	false
+C:\x\y.csv	false	false
+data	false	false
+file:hash/hash--cmd.bin	false	false
+s3://bucket/x	false	false
+variable	false	false
+xvariable:v	false	false
+
+query I
+SELECT count(*) FROM (VALUES ('s3://bucket/x'), ('/local/x'), ('C:\x\y.csv'), ('file:x'), (''), ('variable')) t(p)
+WHERE scalarfs_protocol(p) IS NOT NULL;
+----
+0
+
+# A prefix only counts at the very start of the path.
+query II
+SELECT is_scalarfs_uri(' variable:v'), scalarfs_protocol(' variable:v') IS NULL;
+----
+false	true
+
+# Routing is case-sensitive, so the helpers are too: DATA:x does not open
+# through scalarfs, and a helper that said it did would send a caller down the
+# wrong branch.
+query III
+SELECT is_scalarfs_uri('DATA:,x'), is_data_uri('Data+varchar:x'), scalarfs_protocol('VARIABLE:v');
+----
+false	false	NULL
+
+# =============================================================================
+# NULL in, NULL out
+# =============================================================================
+
+query III
+SELECT is_scalarfs_uri(NULL), is_data_uri(NULL), scalarfs_protocol(NULL);
+----
+NULL	NULL	NULL
+
+# =============================================================================
+# The motivating CASE, per row
+# =============================================================================
+
+query TT
+SELECT ref,
+       CASE WHEN is_data_uri(ref) THEN 'inline'
+            WHEN scalarfs_protocol(ref) = 'variable' THEN 'variable'
+            ELSE 'file' END
+FROM (VALUES ('data+varchar:small output'), ('variable:out'), ('file:abc/abc--cmd.bin'), ('s3://b/k')) t(ref)
+ORDER BY ref;
+----
+data+varchar:small output	inline
+file:abc/abc--cmd.bin	file
+s3://b/k	file
+variable:out	variable
