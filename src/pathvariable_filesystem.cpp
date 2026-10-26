@@ -1,5 +1,6 @@
 #include "pathvariable_filesystem.hpp"
 #include "duckdb_compat.hpp"
+#include "scalarfs_routers.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/file_opener.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -379,11 +380,12 @@ vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener
 		return base + suffix;
 	};
 
-	// Helper to check if a path is a scalarfs protocol (should be passed through without modification)
-	auto is_scalarfs_path = [](const string &p) -> bool {
-		return StringUtil::StartsWith(p, "data:") || StringUtil::StartsWith(p, "data+varchar:") ||
-		       StringUtil::StartsWith(p, "data+blob:") || StringUtil::StartsWith(p, "variable:") ||
-		       StringUtil::StartsWith(p, "pathvariable:");
+	// Helper to check if a path is a scalarfs protocol (should be passed through without modification).
+	// Asks the routing filesystems, so every protocol scalarfs opens counts -- pathmacro:, decompress+
+	// and the tmp_ forms included -- and is_scalarfs_uri() gives the same answer.
+	ScalarfsRouters routers;
+	auto is_scalarfs_path = [&](const string &p) -> bool {
+		return routers.Owns(p);
 	};
 
 	// Helper to check if a path has an explicit protocol (e.g., s3://, https://, file://)

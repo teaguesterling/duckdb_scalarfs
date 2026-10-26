@@ -350,6 +350,73 @@ from_pathmacro_url(url VARCHAR) → STRUCT(macro VARCHAR, params MAP(VARCHAR, VA
 
 - `from_pathmacro_url: '<url>' is not a pathmacro: URL (must start with 'pathmacro:')`
 
+## Protocol Detection Functions
+
+These functions tell you whether scalarfs opens a path, and through which
+protocol. They ask the same filesystems that open the file, so they agree with
+routing: case-sensitive, and the prefix must start the path. They return NULL
+for a NULL input.
+
+### is_scalarfs_uri
+
+```sql
+is_scalarfs_uri(path VARCHAR) → BOOLEAN
+```
+
+True for every scalarfs protocol: `data:`, `data+varchar:`, `data+blob:`,
+`variable:`, `pathvariable:`, `pathmacro:`, `decompress+gz:`,
+`decompress+zstd:`, and the `tmp_` forms of `variable:`, `pathvariable:` and
+`pathmacro:`.
+
+| Input | Output |
+|-------|--------|
+| `'data+varchar:hello'` | `true` |
+| `'variable:my_var'` | `true` |
+| `'s3://bucket/file.txt'` | `false` |
+| `'/local/path/file.txt'` | `false` |
+| `'DATA:,x'` | `false` |
+
+### is_data_uri
+
+```sql
+is_data_uri(path VARCHAR) → BOOLEAN
+```
+
+True only when the path carries its content inline: `data:`, `data+varchar:`
+or `data+blob:`.
+
+| Input | Output |
+|-------|--------|
+| `'data+varchar:hello'` | `true` |
+| `'variable:my_var'` | `false` |
+
+### scalarfs_protocol
+
+```sql
+scalarfs_protocol(path VARCHAR) → VARCHAR
+```
+
+The protocol name without its colon, or NULL when scalarfs does not open the
+path.
+
+| Input | Output |
+|-------|--------|
+| `'data+varchar:hello'` | `'data+varchar'` |
+| `'tmp_variable:x'` | `'tmp_variable'` |
+| `'decompress+gz:s3://bucket/x.gz'` | `'decompress+gz'` |
+| `'s3://bucket/file'` | `NULL` |
+
+```sql
+-- Branch on a storage reference
+CASE
+    WHEN is_data_uri(ref) THEN handle_inline(ref)
+    WHEN scalarfs_protocol(ref) = 'variable' THEN handle_variable(ref)
+    ELSE handle_file(ref)
+END
+```
+
+---
+
 ## Path Functions
 
 ### scalarfs_canonicalize_path

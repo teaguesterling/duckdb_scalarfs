@@ -27,7 +27,7 @@ Modifiers control how paths are resolved, filtered, and constructed. They can be
 | `search` | Return only the first existing file (for multi-root fallback) |
 | `no-missing` | Skip non-existent files instead of erroring |
 | `no-glob` | Disable glob pattern expansion in paths |
-| `no-scalarfs` | Don't modify scalarfs protocol paths with append/prepend |
+| `no-scalarfs` | Don't modify scalarfs protocol paths (any path `is_scalarfs_uri()` accepts) with append/prepend |
 | `no-protocols` | Don't modify paths with explicit protocols (://) with append/prepend |
 | `no-cache` | Reserved for future caching control (currently no-op) |
 | `append!/path` | Append literal path to each base path |
