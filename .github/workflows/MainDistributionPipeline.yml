@@ -55,7 +55,7 @@ jobs:
   #
   # Staging builds only some branch commits, and often not the tip (2026-10-26:
   # af2d380a19 404, two of the newest eight staged). So the resolver walks back up
-  # to 50 commits to the newest staged one and uses that commit with its own
+  # to 150 commits to the newest staged one and uses that commit with its own
   # version, printing a ::notice:: with the lag. No staged commit in range is a
   # staging outage, and the job fails. Same text as plinking_duck #74 (fleet).
   duckdb-next-ref:
@@ -70,7 +70,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          DEPTH=50
+          DEPTH=150
           tip=$(git ls-remote https://github.com/duckdb/duckdb.git refs/heads/v2.0-cyanoptera | cut -f1)
           [ -n "$tip" ] || { echo "::error::could not resolve duckdb v2.0-cyanoptera"; exit 1; }
 
