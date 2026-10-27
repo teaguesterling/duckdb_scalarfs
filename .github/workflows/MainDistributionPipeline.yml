@@ -123,14 +123,58 @@ jobs:
   # branch. Kept as its own job rather than merged into the one above: this one may
   # legitimately be red on churn that will never reach v2.0.0, so it stays gated to
   # dispatch and pushes to main and never enters a PR's check rollup.
+  #
+  # Same skip guard as the next-line build. Without it every leg here reported
+  # "ran tests: 0 passed, 29 skipped" (`require scalarfs: 29`) and concluded green
+  # (main run 40254809357).
+  #
+  # Those skips were the #28 defect again. `duckdb_version: main` reaches the build
+  # as DUCKDB_VERSION=main, and duckdb main's CMakeLists.txt reads that env var as
+  # its explicit version. The binary then reports 'vmain', the extension is stamped
+  # 'main', and the loader refuses it ("built specifically for DuckDB version
+  # 'main' ... this version of DuckDB is 'vmain'"; reproduced locally 2026-10-27).
+  # So the job below resolves main to a (commit, version) pair, computing the
+  # version the way duckdb's own CMake does for a dev build:
+  # v<scripts/ci/release_version.txt>.0-dev<git rev-list --count HEAD>.
+  # Staging builds no prebuilt for main, so ci-tools builds from source.
+  duckdb-main-ref:
+    name: Canary build — resolve DuckDB main
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.resolve.outputs.commit }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+          # Commits only: rev-list --count needs the whole history, not its trees.
+          git clone --quiet --filter=tree:0 --no-checkout --single-branch --branch main \
+              https://github.com/duckdb/duckdb.git "$tmp/duckdb"
+          commit=$(git -C "$tmp/duckdb" rev-parse HEAD)
+          release=$(git -C "$tmp/duckdb" show HEAD:scripts/ci/release_version.txt | tr -d '[:space:]')
+          count=$(git -C "$tmp/duckdb" rev-list --count HEAD)
+          version="v${release}.0-dev${count}"
+          if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.0-dev[0-9]+$ ]]; then
+            echo "::error::could not build a dev version for duckdb main at $commit (got '$version')"
+            exit 1
+          fi
+          echo "duckdb main -> $commit, version $version"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   duckdb-main-canary:
     name: Canary build — DuckDB main (advisory)
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    needs: duckdb-main-ref
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
     with:
-      duckdb_version: main
+      duckdb_version: ${{ needs.duckdb-main-ref.outputs.version }}
+      duckdb_commit: ${{ needs.duckdb-main-ref.outputs.commit }}
       ci_tools_version: main
       extension_name: scalarfs
+      test_config: '{"test_env_variables": {"T": "--test-flags \"--require scalarfs\" \"test/*\""}}'
 
   duckdb-stable-build:
     name: Build extension binaries
