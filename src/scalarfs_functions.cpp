@@ -1,5 +1,4 @@
 #include "scalarfs_functions.hpp"
-#include "duckdb_compat.hpp"
 #include "string_encodings.hpp"
 #include "data_uri_filesystem.hpp"
 #include "pathmacro_filesystem.hpp"
@@ -317,7 +316,7 @@ static void FromScalarfsUriFunction(DataChunk &args, ExpressionState &state, Vec
 static void ScalarfsCanonicalizePathFunction(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &fs = FileSystem::GetFileSystem(state.GetContext());
 	UnaryExecutor::Execute<string_t, string_t>(args.data[0], result, args.size(), [&](string_t input) {
-		return StringVector::AddString(result, CompatCanonicalizePath(fs, input.GetString()));
+		return StringVector::AddString(result, fs.CanonicalizePath(input.GetString()));
 	});
 }
 
@@ -382,10 +381,9 @@ ScalarFunction ScalarfsFunctions::GetToScalarfsUriFunction() {
 //   SetFallible().
 //
 // which turns every negative test's expected message into an internal error.
-// SetFallible() exists identically on the pinned v1.5 (function.hpp:211), where
-// it is likewise the accurate declaration -- these functions really can throw --
-// so this needs no shim and is not a v2.0-only concession. The encoders above
-// are deliberately NOT marked: they cannot fail on any input.
+// These functions really can throw, so SetFallible() is the accurate
+// declaration. The encoders above are deliberately NOT marked: they cannot
+// fail on any input.
 ScalarFunction ScalarfsFunctions::GetFromDataUriFunction() {
 	ScalarFunction fn("from_data_uri", {LogicalType::VARCHAR}, LogicalType::VARCHAR, FromDataUriFunction);
 	fn.SetFallible();
@@ -415,9 +413,7 @@ ScalarFunctionSet ScalarfsFunctions::GetToPathmacroUrlFunctions() {
 	// to_pathmacro_url(macro)
 	ScalarFunction no_params("to_pathmacro_url", {LogicalType::VARCHAR}, LogicalType::VARCHAR, ToPathmacroUrlNoParams);
 	// SetNullHandling rather than assigning the field: v2.0 made Function's
-	// null_handling private. The setter exists identically on both lines
-	// (function.hpp:199 on the pinned v1.5), so this needs no shim -- and it must
-	// still run BEFORE AddFunction, since a FunctionSet hands out
+	// null_handling private. It must run BEFORE AddFunction, since a FunctionSet hands out
 	// shared_ptr<const T> on v2.0 and cannot be reconfigured after the fact.
 	no_params.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
 	// Rejects a macro name that is not a plain SQL identifier, and rejects
@@ -711,10 +707,8 @@ void ScalarfsFunctions::Register(ExtensionLoader &loader) {
 		loader.RegisterFunction(std::move(info));
 	}
 
-	// scalarfs_canonicalize_path -- only where DuckDB has a canonicalize phase.
-	// On a line without FileSystem::CanonicalizePath it could only echo its input,
-	// which would pass for "resolution found nothing" and hide the real reason.
-	if (CompatHasCanonicalizePath<FileSystem>::value) {
+	// scalarfs_canonicalize_path
+	{
 		CreateScalarFunctionInfo info(GetCanonicalizePathFunction());
 		info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
 
