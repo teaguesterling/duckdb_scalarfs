@@ -221,7 +221,7 @@ unique_ptr<FileHandle> PathMacroFileSystem::OpenFile(const string &path, FileOpe
 	if (paths.size() != 1) {
 		throw IOException("pathmacro: '%s' resolved to %llu paths; open a single path or use a globbing reader "
 		                  "(read_parquet/read_csv/read_json)",
-		                  path, (unsigned long long)paths.size());
+		                  path, static_cast<idx_t>(paths.size()));
 	}
 	auto &parent_fs = FileSystem::GetFileSystem(*context);
 	auto underlying = parent_fs.OpenFile(paths[0], flags, nullptr);
@@ -303,7 +303,7 @@ void PathMacroFileSystem::RemoveFile(const string &filename, optional_ptr<FileOp
 	auto paths = ResolvePaths(*context, Parse(filename));
 	if (paths.size() != 1) {
 		throw IOException("pathmacro: '%s' resolved to %llu paths; remove requires a single path", filename,
-		                  (unsigned long long)paths.size());
+		                  static_cast<idx_t>(paths.size()));
 	}
 	auto &parent_fs = FileSystem::GetFileSystem(*context);
 	parent_fs.RemoveFile(paths[0], nullptr);

@@ -78,9 +78,9 @@ int64_t DataURIFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_byt
 	}
 
 	idx_t bytes_to_read = MinValue<idx_t>(nr_bytes, file_size - pos);
-	Read(handle, buffer, bytes_to_read, pos);
+	Read(handle, buffer, NumericCast<int64_t>(bytes_to_read), pos);
 	mem_handle.SetPosition(pos + bytes_to_read);
-	return bytes_to_read;
+	return NumericCast<int64_t>(bytes_to_read);
 }
 
 void DataURIFileSystem::Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) {
@@ -93,7 +93,7 @@ int64_t DataURIFileSystem::Write(FileHandle &handle, void *buffer, int64_t nr_by
 
 int64_t DataURIFileSystem::GetFileSize(FileHandle &handle) {
 	auto &mem_handle = handle.Cast<MemoryFileHandle>();
-	return mem_handle.GetData().size();
+	return NumericCast<int64_t>(mem_handle.GetData().size());
 }
 
 bool DataURIFileSystem::FileExists(const string &filename, optional_ptr<FileOpener> opener) {
