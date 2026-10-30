@@ -165,8 +165,7 @@ string DecompressFileSystem::DecompressContent(const string &compressed, Decompr
 		}
 
 		// Get decompressed size from frame header (if available)
-		uint64_t decompressed_size =
-		    duckdb_zstd::ZSTD_getFrameContentSize(compressed.data(), compressed.size());
+		uint64_t decompressed_size = duckdb_zstd::ZSTD_getFrameContentSize(compressed.data(), compressed.size());
 
 		if (decompressed_size == ZSTD_CONTENTSIZE_ERROR) {
 			throw IOException("Invalid zstd frame header");
@@ -182,8 +181,7 @@ string DecompressFileSystem::DecompressContent(const string &compressed, Decompr
 				                  "scalarfs_max_decompressed_bytes limit (%llu bytes); refusing to "
 				                  "materialize a potential decompression bomb. Raise the limit with "
 				                  "SET scalarfs_max_decompressed_bytes if this is expected.",
-				                  static_cast<idx_t>(decompressed_size),
-				                  static_cast<idx_t>(max_output_bytes));
+				                  static_cast<idx_t>(decompressed_size), static_cast<idx_t>(max_output_bytes));
 			}
 			string decompressed;
 			decompressed.resize(decompressed_size);
