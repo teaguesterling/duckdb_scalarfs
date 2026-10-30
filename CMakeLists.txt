@@ -20,8 +20,7 @@ set(EXTENSION_SOURCES
     src/decompress_filesystem.cpp
     src/variable_copy_function.cpp
     src/scalarfs_functions.cpp
-    src/string_encodings.cpp
-)
+    src/string_encodings.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
@@ -35,12 +34,12 @@ build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 # C++11-built TUs, producing multiple-definition link errors.
 if(MSVC)
     target_compile_options(${EXTENSION_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/std:c++17>")
-    target_compile_options(${LOADABLE_EXTENSION_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/std:c++17>")
+    target_compile_options(${LOADABLE_EXTENSION_NAME}
+                           PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/std:c++17>")
 endif()
 
-
 install(
-  TARGETS ${EXTENSION_NAME}
-  EXPORT "${DUCKDB_EXPORT_SET}"
-  LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
-  ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
+    TARGETS ${EXTENSION_NAME}
+    EXPORT "${DUCKDB_EXPORT_SET}"
+    LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
+    ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
