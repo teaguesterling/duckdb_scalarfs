@@ -23,13 +23,13 @@ string DecodeURLEncoded(const string &input) {
 		}
 		if (i + 2 >= input.size()) {
 			throw InvalidInputException("Invalid URL encoding - incomplete '%%' escape at position %llu",
-			                            (unsigned long long)i);
+			                            static_cast<idx_t>(i));
 		}
 		char c1 = input[i + 1];
 		char c2 = input[i + 2];
 		if (!IsHexDigit(c1) || !IsHexDigit(c2)) {
 			throw InvalidInputException("Invalid URL encoding - '%%%c%c' is not valid hex at position %llu", c1, c2,
-			                            (unsigned long long)i);
+			                            static_cast<idx_t>(i));
 		}
 		char hex[3] = {c1, c2, '\0'};
 		result += static_cast<char>(strtol(hex, nullptr, 16));
@@ -130,21 +130,21 @@ string DecodeBlobEscapes(const string &input) {
 			if (i + 3 >= input.size()) {
 				throw InvalidInputException("Invalid escape sequence: incomplete \\x at position %llu (expected 2 hex "
 				                            "digits)",
-				                            (unsigned long long)i);
+				                            static_cast<idx_t>(i));
 			}
 			char hex[3] = {input[i + 2], input[i + 3], '\0'};
 			char *end;
-			long val = strtol(hex, &end, 16);
+			int64_t val = strtol(hex, &end, 16);
 			if (end != hex + 2) {
 				throw InvalidInputException("Invalid escape sequence: '\\x%s' is not valid hex at position %llu",
-				                            string(hex), (unsigned long long)i);
+				                            string(hex), static_cast<idx_t>(i));
 			}
 			result += static_cast<char>(val);
 			i += 3;
 			break;
 		}
 		default:
-			throw InvalidInputException("Invalid escape sequence '\\%c' at position %llu", next, (unsigned long long)i);
+			throw InvalidInputException("Invalid escape sequence '\\%c' at position %llu", next, static_cast<idx_t>(i));
 		}
 	}
 	return result;

@@ -232,9 +232,9 @@ int64_t VariableFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_by
 	}
 
 	idx_t bytes_to_read = MinValue<idx_t>(nr_bytes, file_size - pos);
-	Read(handle, buffer, bytes_to_read, pos);
+	Read(handle, buffer, NumericCast<int64_t>(bytes_to_read), pos);
 	read_handle.SetPosition(pos + bytes_to_read);
-	return bytes_to_read;
+	return NumericCast<int64_t>(bytes_to_read);
 }
 
 void VariableFileSystem::Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) {
@@ -266,10 +266,10 @@ int64_t VariableFileSystem::GetFileSize(FileHandle &handle) {
 	// Check if it's a read or write handle
 	if (handle.GetFlags().OpenForWriting()) {
 		auto &write_handle = handle.Cast<VariableWriteHandle>();
-		return write_handle.GetBuffer().size();
+		return NumericCast<int64_t>(write_handle.GetBuffer().size());
 	} else {
 		auto &read_handle = handle.Cast<VariableReadHandle>();
-		return read_handle.GetData().size();
+		return NumericCast<int64_t>(read_handle.GetData().size());
 	}
 }
 

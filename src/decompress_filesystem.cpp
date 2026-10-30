@@ -75,7 +75,7 @@ string UncompressGZIPStringCapped(const string &in, idx_t max_output_bytes) {
 			throw IOException("Decompressed output exceeds scalarfs_max_decompressed_bytes limit "
 			                  "(%llu bytes); refusing to materialize a potential decompression bomb. "
 			                  "Raise the limit with SET scalarfs_max_decompressed_bytes if this is expected.",
-			                  static_cast<unsigned long long>(max_output_bytes));
+			                  static_cast<idx_t>(max_output_bytes));
 		}
 		auto new_bytes = mz_stream_ptr->total_out - decompressed.size();
 		decompressed.append(reinterpret_cast<char *>(decompress_buffer), new_bytes);
@@ -165,7 +165,7 @@ string DecompressFileSystem::DecompressContent(const string &compressed, Decompr
 		}
 
 		// Get decompressed size from frame header (if available)
-		unsigned long long decompressed_size =
+		uint64_t decompressed_size =
 		    duckdb_zstd::ZSTD_getFrameContentSize(compressed.data(), compressed.size());
 
 		if (decompressed_size == ZSTD_CONTENTSIZE_ERROR) {
@@ -182,8 +182,8 @@ string DecompressFileSystem::DecompressContent(const string &compressed, Decompr
 				                  "scalarfs_max_decompressed_bytes limit (%llu bytes); refusing to "
 				                  "materialize a potential decompression bomb. Raise the limit with "
 				                  "SET scalarfs_max_decompressed_bytes if this is expected.",
-				                  static_cast<unsigned long long>(decompressed_size),
-				                  static_cast<unsigned long long>(max_output_bytes));
+				                  static_cast<idx_t>(decompressed_size),
+				                  static_cast<idx_t>(max_output_bytes));
 			}
 			string decompressed;
 			decompressed.resize(decompressed_size);
@@ -232,7 +232,7 @@ string DecompressFileSystem::DecompressContent(const string &compressed, Decompr
 				throw IOException("Decompressed output exceeds scalarfs_max_decompressed_bytes limit "
 				                  "(%llu bytes); refusing to materialize a potential decompression bomb. "
 				                  "Raise the limit with SET scalarfs_max_decompressed_bytes if this is expected.",
-				                  static_cast<unsigned long long>(max_output_bytes));
+				                  static_cast<idx_t>(max_output_bytes));
 			}
 
 			decompressed.append(out_buf.get(), output.pos);
@@ -268,7 +268,7 @@ unique_ptr<FileHandle> DecompressFileSystem::OpenFile(const string &path, FileOp
 	string compressed_content;
 	compressed_content.resize(file_size);
 	if (file_size > 0) {
-		parent_fs.Read(*underlying_handle, (void *)compressed_content.data(), file_size, 0);
+		parent_fs.Read(*underlying_handle, (void *)compressed_content.data(), NumericCast<int64_t>(file_size), 0);
 	}
 	underlying_handle->Close();
 
@@ -315,9 +315,9 @@ int64_t DecompressFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_
 	}
 
 	idx_t bytes_to_read = MinValue<idx_t>(nr_bytes, file_size - pos);
-	Read(handle, buffer, bytes_to_read, pos);
+	Read(handle, buffer, NumericCast<int64_t>(bytes_to_read), pos);
 	mem_handle.SetPosition(pos + bytes_to_read);
-	return bytes_to_read;
+	return NumericCast<int64_t>(bytes_to_read);
 }
 
 void DecompressFileSystem::Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) {
@@ -330,7 +330,7 @@ int64_t DecompressFileSystem::Write(FileHandle &handle, void *buffer, int64_t nr
 
 int64_t DecompressFileSystem::GetFileSize(FileHandle &handle) {
 	auto &mem_handle = handle.Cast<MemoryFileHandle>();
-	return mem_handle.GetData().size();
+	return NumericCast<int64_t>(mem_handle.GetData().size());
 }
 
 bool DecompressFileSystem::FileExists(const string &filename, optional_ptr<FileOpener> opener) {

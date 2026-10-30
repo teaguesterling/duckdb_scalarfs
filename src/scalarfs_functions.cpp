@@ -236,8 +236,8 @@ static Value ParsePathmacroUrl(const string &url) {
 	auto parsed = PathMacroFileSystem::Parse(url);
 	vector<Value> keys, vals;
 	for (auto &kv : parsed.params) {
-		keys.emplace_back(Value(kv.first));
-		vals.emplace_back(Value(kv.second));
+		keys.emplace_back(kv.first);
+		vals.emplace_back(kv.second);
 	}
 	child_list_t<Value> fields;
 	fields.emplace_back("macro", Value(parsed.macro_name));
