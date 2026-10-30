@@ -48,8 +48,7 @@ public:
 	// DuckDB v2.0's COPY TO path probes the target with DirectoryExists() before
 	// writing (PhysicalCopyToFile / CopyToFileGlobalState). FileSystem's base
 	// implementation throws "not implemented", so every write through this
-	// filesystem fails on v2.0 unless it is overridden. Declared unconditionally:
-	// the signature is identical on v1.5 and v2.0, and v1.5 simply never calls it.
+	// filesystem fails on v2.0 unless it is overridden.
 	bool DirectoryExists(const string &directory, optional_ptr<FileOpener> opener) override;
 	void Seek(FileHandle &handle, idx_t location) override;
 	idx_t SeekPosition(FileHandle &handle) override;

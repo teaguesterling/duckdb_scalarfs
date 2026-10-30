@@ -4,7 +4,7 @@
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/open_file_info.hpp"
 #include "duckdb/main/client_context.hpp"
-#include "duckdb_compat.hpp"
+#include "canonicalizing_filesystem.hpp"
 #include "pathvariable_modifiers.hpp"
 #include <mutex>
 #include <unordered_map>
@@ -36,7 +36,7 @@ namespace duckdb {
 //   MoveFile handles the temp -> final path transition
 //
 
-class PathVariableFileSystem : public CompatCanonicalizingFileSystem<FileSystem> {
+class PathVariableFileSystem : public ScalarfsCanonicalizingFileSystem {
 public:
 	// FileSystem interface
 	unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) override;
@@ -69,8 +69,7 @@ public:
 	// DuckDB v2.0's COPY TO path probes the target with DirectoryExists() before
 	// writing (PhysicalCopyToFile / CopyToFileGlobalState). FileSystem's base
 	// implementation throws "not implemented", so every write through this
-	// filesystem fails on v2.0 unless it is overridden. Declared unconditionally:
-	// the signature is identical on v1.5 and v2.0, and v1.5 simply never calls it.
+	// filesystem fails on v2.0 unless it is overridden.
 	bool DirectoryExists(const string &directory, optional_ptr<FileOpener> opener) override;
 	void Seek(FileHandle &handle, idx_t location) override;
 	idx_t SeekPosition(FileHandle &handle) override;

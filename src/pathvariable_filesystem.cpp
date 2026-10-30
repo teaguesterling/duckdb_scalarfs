@@ -1,5 +1,4 @@
 #include "pathvariable_filesystem.hpp"
-#include "duckdb_compat.hpp"
 #include "scalarfs_routers.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/file_opener.hpp"
@@ -188,7 +187,7 @@ string PathVariableFileSystem::ResolvePath(const string &path, optional_ptr<File
 // Lossless or nothing. CanonicalizePath also runs where no error is expected
 // (ATTACH, the instance cache), so a path that does not name exactly one file
 // comes back unchanged and the open that follows reports why. The stored value
-// is returned as-is; CompatCanonicalizingFileSystem then canonicalizes it
+// is returned as-is; ScalarfsCanonicalizingFileSystem then canonicalizes it
 // through its own owner, with a depth cap against self-referencing variables.
 string PathVariableFileSystem::ResolveCanonicalPath(const string &path, optional_ptr<FileOpener> opener) {
 	if (!CanHandleFile(path)) {
@@ -426,10 +425,7 @@ vector<OpenFileInfo> PathVariableFileSystem::Glob(const string &path, FileOpener
 	} else {
 		// Level 1: Glob on variable names
 		for (const auto &entry : config.user_variables) {
-			// CompatNameStr resolves on entry.first's actual type (string on the v1.5.x
-			// line incl. the v1.5.6 partial backport, Identifier on v2.0), not on whether
-			// identifier.hpp is present — those two facts have come apart on v1.5.6.
-			const string var_name = CompatNameStr(entry.first);
+			const string var_name = entry.first.GetIdentifierName();
 			const Value &var_value = entry.second;
 
 			if (duckdb::Glob(var_name.c_str(), var_name.size(), pattern.c_str(), pattern.size())) {
