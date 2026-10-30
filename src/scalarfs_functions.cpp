@@ -211,7 +211,7 @@ static void ToPathmacroUrlNoParams(DataChunk &args, ExpressionState &state, Vect
 		}
 		result.SetValue(row, Value(BuildPathmacroUrl(StringValue::Get(mv), nullptr)));
 	}
-	result.Verify(count);
+	result.Verify();
 }
 
 static void ToPathmacroUrlWithParams(DataChunk &args, ExpressionState &state, Vector &result) {
@@ -225,7 +225,7 @@ static void ToPathmacroUrlWithParams(DataChunk &args, ExpressionState &state, Ve
 		Value pv = args.data[1].GetValue(row);
 		result.SetValue(row, Value(BuildPathmacroUrl(StringValue::Get(mv), &pv)));
 	}
-	result.Verify(count);
+	result.Verify();
 }
 
 static Value ParsePathmacroUrl(const string &url) {
@@ -255,7 +255,7 @@ static void FromPathmacroUrlFunction(DataChunk &args, ExpressionState &state, Ve
 		}
 		result.SetValue(row, ParsePathmacroUrl(StringValue::Get(uv)));
 	}
-	result.Verify(count);
+	result.Verify();
 }
 
 // =============================================================================
