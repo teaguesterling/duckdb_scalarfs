@@ -176,12 +176,13 @@ jobs:
       extension_name: scalarfs
       test_config: '{"test_env_variables": {"T": "--test-flags \"--require scalarfs\" \"test/*\""}}'
 
-  # THE SHIPPING LINE: DuckDB v2.0.0, promoted from v1.5.6 (2026-10-30). There is
-  # no v1.5.6 leg any more: the registry no longer builds v1.5 extensions, the
-  # same call plinking_duck made (f17a5da). The commit is upstream's v2.0.0
-  # release TAG, measured today:
-  #   git ls-remote https://github.com/duckdb/duckdb.git refs/tags/v2.0.0
-  #     -> d54cbbe3df17e8e5ce68312f483b4155836112aa
+  # THE SHIPPING LINE: DuckDB v2.0.1, the registry default since 2026-11-23
+  # (v2.0.0 was promoted from v1.5.6 on 2026-10-30). There is no v1.5.6 leg any
+  # more: the registry no longer builds v1.5 extensions, the same call
+  # plinking_duck made (f17a5da). The commit is upstream's v2.0.1 release TAG,
+  # measured 2026-11-23:
+  #   git ls-remote https://github.com/duckdb/duckdb.git refs/tags/v2.0.1
+  #     -> 8d78114e90a53823803660bf821f6073ac87da8c
   #
   # duckdb_version is a RELEASE TAG, never a branch name (see the note above
   # duckdb-next-ref). The `uses:` ref and ci_tools_version are the
@@ -191,8 +192,8 @@ jobs:
     name: Build extension binaries
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v2.0-cyanoptera
     with:
-      duckdb_version: v2.0.0
-      duckdb_commit: d54cbbe3df17e8e5ce68312f483b4155836112aa
+      duckdb_version: v2.0.1
+      duckdb_commit: 8d78114e90a53823803660bf821f6073ac87da8c
       ci_tools_version: v2.0-cyanoptera
       extension_name: scalarfs
       # The skip guard now belongs on the shipping leg too: on v2.0 a scalarfs that
@@ -206,7 +207,7 @@ jobs:
       # duckdb_version is deprecated on this workflow. Format and tidy run the
       # checked-out duckdb SUBMODULE's scripts, so the submodule bump is what
       # changes them.
-      duckdb_version: v2.0.0
+      duckdb_version: v2.0.1
       ci_tools_version: v2.0-cyanoptera
       extension_name: scalarfs
       format_checks: 'format;tidy'
